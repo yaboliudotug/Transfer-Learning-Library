@@ -144,16 +144,16 @@ def prepare_cityscapes_to_voc(cityscapes_dir, save_path, suffix, image_dir):
 
 
 if __name__ == '__main__':
-    cityscapes_dir = 'datasets/cityscapes/'
+    cityscapes_dir = '/disk/liuyabo/data/daod/cityscapes/'
     if not os.path.exists(cityscapes_dir):
         print("Please put cityscapes datasets in: {}".format(cityscapes_dir))
         exit(0)
-    save_path = 'datasets/cityscapes_in_voc/'
+    save_path = '/disk/liuyabo/data/daod/cityscapes/cityscapes_in_voc/'
     suffix = "_leftImg8bit"
     image_dir = "leftImg8bit"
     prepare_cityscapes_to_voc(cityscapes_dir, save_path, suffix, image_dir)
 
-    save_path = 'datasets/foggy_cityscapes_in_voc/'
+    save_path = '/disk/liuyabo/data/daod/cityscapes/foggy_cityscapes_in_voc/'
     suffix = "_leftImg8bit_foggy_beta_0.02"
     image_dir = "leftImg8bit_foggy"
     prepare_cityscapes_to_voc(cityscapes_dir, save_path, suffix, image_dir)
