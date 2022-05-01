@@ -195,9 +195,6 @@ if __name__ == "__main__":
     # args.target = utils.build_dataset(args.target[::2], args.target[1::2])
     # args.test = utils.build_dataset(args.test[::2], args.test[1::2])
 
-    print('here  >>>>>>')
-    print(list(DatasetCatalog.keys()))
-
     launch(
         main,
         args.num_gpus,
