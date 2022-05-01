@@ -132,3 +132,4 @@ trash/*
 examples/domain_adaptation/digits/logs/*
 examples/domain_adaptation/digits/data/*
 examples/domain_adaptation/object_detection/datasets/*
+examples/domain_adaptation/object_detection/logs/*

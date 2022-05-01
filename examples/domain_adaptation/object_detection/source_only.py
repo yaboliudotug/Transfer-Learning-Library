@@ -18,6 +18,11 @@ from detectron2.data import (
     build_detection_train_loader,
     get_detection_dataset_dicts,
 )
+from detectron2.data import (
+    MetadataCatalog,
+    DatasetCatalog,
+)
+
 from detectron2.utils.events import EventStorage
 
 sys.path.append('../../..')
@@ -71,6 +76,10 @@ def train(model, logger, cfg, args):
     writers = default_writers(cfg.OUTPUT_DIR, max_iter) if comm.is_main_process() else []
 
     # Data loading code
+    args.source = utils.build_dataset(args.source[::2], args.source[1::2])
+    args.target = utils.build_dataset(args.target[::2], args.target[1::2])
+    args.test = utils.build_dataset(args.test[::2], args.test[1::2])
+
     train_source_dataset = get_detection_dataset_dicts(args.source)
     train_source_loader = build_detection_train_loader(dataset=train_source_dataset, cfg=cfg)
 
@@ -182,9 +191,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
     print("Command Line Args:", args)
 
-    args.source = utils.build_dataset(args.source[::2], args.source[1::2])
-    args.target = utils.build_dataset(args.target[::2], args.target[1::2])
-    args.test = utils.build_dataset(args.test[::2], args.test[1::2])
+    # args.source = utils.build_dataset(args.source[::2], args.source[1::2])
+    # args.target = utils.build_dataset(args.target[::2], args.target[1::2])
+    # args.test = utils.build_dataset(args.test[::2], args.test[1::2])
+
+    print('here  >>>>>>')
+    print(list(DatasetCatalog.keys()))
 
     launch(
         main,
