@@ -127,6 +127,10 @@ def train(model, logger, cfg, args, args_cls, args_box):
 
     writers = default_writers(cfg.OUTPUT_DIR, max_iter) if comm.is_main_process() else []
 
+    args.sources = utils.build_dataset(args.sources[::2], args.sources[1::2])
+    args.targets = utils.build_dataset(args.targets[::2], args.targets[1::2])
+    args.test = utils.build_dataset(args.test[::2], args.test[1::2])
+
     # generate proposals from detector
     classes = MetadataCatalog.get(args.targets[0]).thing_classes
     cache_proposal_root = os.path.join(cfg.OUTPUT_DIR, "cache", "proposal")
@@ -334,9 +338,7 @@ if __name__ == "__main__":
     print("Detection Args:")
     pprint.pprint(args)
 
-    args.sources = utils.build_dataset(args.sources[::2], args.sources[1::2])
-    args.targets = utils.build_dataset(args.targets[::2], args.targets[1::2])
-    args.test = utils.build_dataset(args.test[::2], args.test[1::2])
+
 
     launch(
         main,

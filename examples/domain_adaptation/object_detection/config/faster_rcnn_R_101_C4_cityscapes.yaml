@@ -25,7 +25,7 @@ DATASETS:
   TEST: ("cityscapes_test",)
 SOLVER:
   STEPS: (12000,)
-  MAX_ITER: 16000  # 16 epochs
+  MAX_ITER: 32000  # 16 epochs
   WARMUP_ITERS: 100
   CHECKPOINT_PERIOD: 2000
   IMS_PER_BATCH: 2

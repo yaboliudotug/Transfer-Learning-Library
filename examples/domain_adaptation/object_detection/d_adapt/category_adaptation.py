@@ -406,9 +406,9 @@ class CategoryAdaptor:
         parser.add_argument('--epsilon-c', default=0.01, type=float,
                             help='epsilon hyper-parameter in Robust Cross Entropy')
         # training parameters
-        parser.add_argument('--batch-size-c', default=64, type=int,
+        parser.add_argument('--batch-size-c', default=128, type=int,
                             metavar='N',
-                            help='mini-batch size (default: 64)')
+                            help='mini-batch size (default: 64)')   # 64
         parser.add_argument('--learning-rate-c', default=0.01, type=float,
                             metavar='LR', help='initial learning rate', dest='lr')
         parser.add_argument('--lr-gamma-c', default=0.001, type=float, help='parameter for lr scheduler')
