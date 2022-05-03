@@ -338,8 +338,6 @@ if __name__ == "__main__":
     print("Detection Args:")
     pprint.pprint(args)
 
-
-
     launch(
         main,
         args.num_gpus,

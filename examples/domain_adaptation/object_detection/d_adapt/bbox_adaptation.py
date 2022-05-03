@@ -504,7 +504,7 @@ class BoundingBoxAdaptor:
         parser.add_argument('--trade-off', default=0.1, type=float,
                             help='the trade-off hyper-parameter for transfer loss')
         # training parameters
-        parser.add_argument('--batch-size-b', default=64, type=int,
+        parser.add_argument('--batch-size-b', default=16, type=int,
                             metavar='N',
                             help='mini-batch size (default: 64)') # 32
         parser.add_argument('--lr-b', default=0.004, type=float,
@@ -524,8 +524,8 @@ class BoundingBoxAdaptor:
         parser.add_argument('--pretrain-lr-decay-b', default=0.75, type=float, help='parameter for lr scheduler')
         parser.add_argument('--pretrain-weight-decay-b', default=1e-3, type=float,
                             metavar='W', help='weight decay (default: 1e-3)')
-        parser.add_argument('--pretrain-epochs-b', default=10, type=int, metavar='N',
-                            help='number of total epochs to run')
+        parser.add_argument('--pretrain-epochs-b', default=2, type=int, metavar='N',
+                            help='number of total epochs to run')   # 10
         parser.add_argument('--iters-per-epoch-b', default=1000, type=int,
                             help='Number of iterations per epoch')
         parser.add_argument('--print-freq-b', default=100, type=int,
