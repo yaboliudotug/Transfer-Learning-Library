@@ -271,7 +271,7 @@ class CategoryAdaptor:
                 data_time.update(time.time() - end)
 
                 # compute output
-                x = torch.cat((x_s, x_t), dim=0)
+                x = torch.cat((x_s, x_t), dim=0)    #此处相当于batchsize变大两倍，可以不cat，使bs与设置保持一直
                 y, f = model(x)
                 y_s, y_t = y.chunk(2, dim=0)
                 f_s, f_t = f.chunk(2, dim=0)
