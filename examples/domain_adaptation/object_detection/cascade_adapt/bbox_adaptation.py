@@ -192,6 +192,8 @@ class BoundingBoxAdaptor:
         dataset = ProposalDataset(filtered_proposals_list, transform, crop_func=ExpandCrop(self.args.expand))
         dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
                                 shuffle=True, num_workers=self.args.workers, drop_last=True)
+        print('******')
+        print(self.args.batch_size)
         return dataloader
 
     def prepare_validation_data(self, proposal_list: PersistentProposalList):
@@ -333,6 +335,12 @@ class BoundingBoxAdaptor:
         optimizer = Adam(model.get_parameters(), args.pretrain_lr, weight_decay=args.pretrain_weight_decay)
         lr_scheduler = LambdaLR(optimizer, lambda x: args.pretrain_lr * (1. + args.pretrain_lr_gamma * float(x)) ** (-args.pretrain_lr_decay))
 
+        if args.iters_perepoch_mode == 'compute_from_epoch':
+            num_iters_source = len(iter_source)
+            args.iters_per_epoch = int(num_iters_source / args.batch_size)
+            args.iters_per_epoch = args.iters_per_epoch * args.coefficient
+        
+        print('num iters per epoch:', args.iters_per_epoch)
         for epoch in range(args.pretrain_epochs):
             print("lr:", lr_scheduler.get_last_lr()[0])
             batch_time = AverageMeter('Time', ':3.1f')
@@ -387,10 +395,20 @@ class BoundingBoxAdaptor:
                 iou = self.validate(data_loader_validation, model, box_transform, args)
                 best_iou = max(iou, best_iou)
 
+        model.to(torch.device("cpu"))
+
         # training on both domains
-        model = self.model
+        model = self.model.cuda()
         optimizer = SGD(model.get_parameters(), args.lr, momentum=args.momentum, weight_decay=args.weight_decay, nesterov=True)
         lr_scheduler = LambdaLR(optimizer, lambda x: args.lr * (1. + args.lr_gamma * float(x)) ** (-args.lr_decay))
+
+        print('#######')
+        if args.iters_perepoch_mode == 'compute_from_epoch':
+            num_iters_source = len(iter_source)
+            num_iters_target = len(iter_target)
+            args.iters_per_epoch = int(max(num_iters_source, num_iters_target) / args.batch_size)
+            args.iters_per_epoch = args.iters_per_epoch * args.coefficient
+        print('num iters per epoch:', args.iters_per_epoch)
 
         for epoch in range(args.epochs):
             print("lr:", lr_scheduler.get_last_lr()[0])
@@ -430,10 +448,13 @@ class BoundingBoxAdaptor:
                 data_time.update(time.time() - end)
 
                 # compute output
-                x = torch.cat([x_s, x_t], dim=0)
-                outputs, outputs_adv = model(x)
-                pred_delta_s, pred_delta_t = outputs.chunk(2, dim=0)
-                pred_delta_s_adv, pred_delta_t_adv = outputs_adv.chunk(2, dim=0)
+                # x = torch.cat([x_s, x_t], dim=0)
+                # outputs, outputs_adv = model(x)
+                # pred_delta_s, pred_delta_t = outputs.chunk(2, dim=0)
+                # pred_delta_s_adv, pred_delta_t_adv = outputs_adv.chunk(2, dim=0)
+                pred_delta_s, pred_delta_s_adv = model(x_s)
+                pred_delta_t, pred_delta_t_adv = model(x_t)
+
                 pred_delta_s, pred_boxes_s = box_transform(pred_delta_s, gt_classes_s, pred_boxes_s)
                 pred_delta_t, pred_boxes_t = box_transform(pred_delta_t, gt_classes_t, pred_boxes_t)
                 pred_delta_s_adv, pred_boxes_s_adv = box_transform(pred_delta_s_adv, gt_classes_s, pred_boxes_s)
@@ -504,9 +525,13 @@ class BoundingBoxAdaptor:
         parser.add_argument('--trade-off', default=0.1, type=float,
                             help='the trade-off hyper-parameter for transfer loss')
         # training parameters
-        parser.add_argument('--batch-size-b', default=64, type=int,
+        parser.add_argument('--batch-size-b', default=24, type=int,
                             metavar='N',
                             help='mini-batch size (default: 64)') # 32
+        parser.add_argument('--iters-perepoch-mode', default='compute_from_epoch', type=str,
+                            help='iters-perepoch-mode')     
+        parser.add_argument('--coefficient', default=5, type=int,
+                            help='iters-perepoch-mode coefficient')                        
         parser.add_argument('--lr-b', default=0.004, type=float,
                             metavar='LR', help='initial learning rate')
         parser.add_argument('--lr-gamma-b', default=0.0002, type=float, help='parameter for lr scheduler')
@@ -516,7 +541,7 @@ class BoundingBoxAdaptor:
         parser.add_argument('--momentum', default=0.9, type=float, metavar='M', help='momentum')
         parser.add_argument('--workers-b', default=4, type=int, metavar='N',
                             help='number of data loading workers (default: 2)')
-        parser.add_argument('--epochs-b', default=2, type=int, metavar='N',
+        parser.add_argument('--epochs-b', default=10, type=int, metavar='N',
                             help='number of total epochs to run')
         parser.add_argument('--pretrain-lr-b', default=0.001, type=float,
                             metavar='LR', help='initial learning rate')

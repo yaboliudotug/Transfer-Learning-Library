@@ -8,6 +8,7 @@ import os
 import argparse
 import sys
 import pprint
+from time import sleep
 import numpy as np
 
 import torch
@@ -140,7 +141,8 @@ def train(model, logger, cfg, args, args_cls, args_box):
 
     # train the category adaptor
     category_adaptor = category_adaptation.CategoryAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "cls"), args_cls)
-    if not category_adaptor.load_checkpoint():
+    # if not category_adaptor.load_checkpoint():
+    if True:
         data_loader_source = category_adaptor.prepare_training_data(prop_s_fg + prop_s_bg, True)
         data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False)
         data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg)
@@ -259,7 +261,7 @@ def main(args, args_cls, args_box):
     # create model
     model = models.__dict__[cfg.MODEL.META_ARCHITECTURE](cfg, finetune=args.finetune)
     model.to(torch.device(cfg.MODEL.DEVICE))
-    logger.info("Model:\n{}".format(model))
+    # logger.info("Model:\n{}".format(model))
 
     if args.eval_only:
         DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
@@ -282,11 +284,11 @@ def main(args, args_cls, args_box):
 if __name__ == "__main__":
     args_cls, argv = category_adaptation.CategoryAdaptor.get_parser().parse_known_args()
     print("Category Adaptation Args:")
-    pprint.pprint(args_cls)
+    # pprint.pprint(args_cls)
 
     args_box, argv = bbox_adaptation.BoundingBoxAdaptor.get_parser().parse_known_args(args=argv)
     print("Bounding Box Adaptation Args:")
-    pprint.pprint(args_box)
+    # pprint.pprint(args_box)
 
     parser = argparse.ArgumentParser(add_help=True)
     # dataset parameters
@@ -336,7 +338,7 @@ if __name__ == "__main__":
     )
     args, argv = parser.parse_known_args(argv)
     print("Detection Args:")
-    pprint.pprint(args)
+    # pprint.pprint(args)
 
     launch(
         main,

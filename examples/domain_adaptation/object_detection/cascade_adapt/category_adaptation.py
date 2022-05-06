@@ -22,6 +22,9 @@ from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
 import torchvision.transforms as T
 import torch.nn.functional as F
+from torch.nn.parallel import DistributedDataParallel
+
+import detectron2.utils.comm as comm
 
 sys.path.append('../../../..')
 from tllib.modules.domain_discriminator import DomainDiscriminator
@@ -226,11 +229,25 @@ class CategoryAdaptor:
             num_classes=num_classes, features_dim=feature_dim, randomized=args.randomized,
             randomized_dim=args.randomized_dim
         ).to(device)
-        print('>>>>>>>>>')
-        print(model.device)
-        print(domain_adv.device)
+
+        if distributed:
+            model = DistributedDataParallel(
+                model, device_ids=[comm.get_local_rank()], broadcast_buffers=False
+            )
+            domain_adv = DistributedDataParallel(
+                domain_adv, device_ids=[comm.get_local_rank()], broadcast_buffers=False
+            )
+
         # start training
         best_acc1 = 0.
+        num_iters_source = len(iter_source)
+        num_iters_target = len(iter_target)
+        print('>>>>>>>>')
+        if args.iters_perepoch_mode == 'compute_from_epoch':
+            args.iters_per_epoch = int(max(num_iters_source, num_iters_target) / args.batch_size)
+            args.iters_per_epoch = args.iters_per_epoch * args.coefficient
+        print('num iters per epoch:', args.iters_per_epoch)
+
         for epoch in range(args.epochs):
             print("lr:", lr_scheduler.get_last_lr()[0])
             # train for one epoch
@@ -410,7 +427,8 @@ class CategoryAdaptor:
         # training parameters
         parser.add_argument('--batch-size-c', default=96, type=int,
                             metavar='N',
-                            help='mini-batch size (default: 64)')   # 64
+                            help='mini-batch size (default: 64)')   
+                            # 64，实际预测时，会把source和target cat到一起，batch_size会变成2倍
         parser.add_argument('--learning-rate-c', default=0.01, type=float,
                             metavar='LR', help='initial learning rate', dest='lr')
         parser.add_argument('--lr-gamma-c', default=0.001, type=float, help='parameter for lr scheduler')
@@ -421,10 +439,14 @@ class CategoryAdaptor:
                             dest='weight_decay')
         parser.add_argument('--workers-c', default=2, type=int, metavar='N',
                             help='number of data loading workers (default: 2)')
-        parser.add_argument('--epochs-c', default=1, type=int, metavar='N',
+        parser.add_argument('--epochs-c', default=10, type=int, metavar='N',
                             help='number of total epochs to run')   # 10
         parser.add_argument('--iters-per-epoch-c', default=1000, type=int,
                             help='Number of iterations per epoch')
+        parser.add_argument('--iters-perepoch-mode', default='compute_from_epoch', type=str,
+                            help='iters-perepoch-mode')    
+        parser.add_argument('--coefficient', default=5, type=int,
+                            help='iters-perepoch-mode coefficient')                   
         parser.add_argument('--print-freq-c', default=100, type=int,
                             metavar='N', help='print frequency (default: 100)')
         parser.add_argument('--seed-c', default=None, type=int,
