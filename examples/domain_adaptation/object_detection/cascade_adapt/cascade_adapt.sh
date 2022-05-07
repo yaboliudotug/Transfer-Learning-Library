@@ -10,7 +10,7 @@ CUDA_VISIBLE_DEVICES=3 python cascade_adapt.py --num-gpus 1 \
 
 # 47.9
 pretrained_models=logs/faster_rcnn_R_101_C4/voc2clipart/phase1/model_final.pth
-CUDA_VISIBLE_DEVICES=3 python d_adapt.py --num-gpus 1 --confidence-ratio-c 0.1 \
+CUDA_VISIBLE_DEVICES=3 python cascade_adapt.py --num-gpus 1 --confidence-ratio-c 0.1 \
   --config-file config/faster_rcnn_R_101_C4_voc.yaml \
   -s VOC2007 ../datasets/VOC2007 VOC2012 ../datasets/VOC2012  \
   -t Clipart ../datasets/clipart --test Clipart ../datasets/clipart \
@@ -19,7 +19,7 @@ CUDA_VISIBLE_DEVICES=3 python d_adapt.py --num-gpus 1 --confidence-ratio-c 0.1 \
 
 # 49.0
 pretrained_models=logs/faster_rcnn_R_101_C4/voc2clipart/phase2/model_final.pth
-CUDA_VISIBLE_DEVICES=3 python d_adapt.py --num-gpus 1 --confidence-ratio-c 0.2 \
+CUDA_VISIBLE_DEVICES=3 python cascade_adapt.py --num-gpus 1 --confidence-ratio-c 0.2 \
   --config-file config/faster_rcnn_R_101_C4_voc.yaml \
   -s VOC2007 ../datasets/VOC2007 VOC2012 ../datasets/VOC2012  \
   -t Clipart ../datasets/clipart --test Clipart ../datasets/clipart \

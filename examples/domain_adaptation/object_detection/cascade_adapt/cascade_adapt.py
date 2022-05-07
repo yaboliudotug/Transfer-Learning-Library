@@ -161,7 +161,8 @@ def train(model, logger, cfg, args, args_cls, args_box):
     if args.bbox_refine:
         # train the bbox adaptor
         bbox_adaptor = bbox_adaptation.BoundingBoxAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "bbox"), args_box)
-        if not bbox_adaptor.load_checkpoint():
+        # if not bbox_adaptor.load_checkpoint():
+        if True:
             data_loader_source = bbox_adaptor.prepare_training_data(prop_s_fg, True)
             data_loader_target = bbox_adaptor.prepare_training_data(prop_t_fg, False)
             data_loader_validation = bbox_adaptor.prepare_validation_data(prop_t_fg)
