@@ -30,11 +30,11 @@ import tllib.alignment.d_adapt.modeling.meta_arch as models
 from tllib.alignment.d_adapt.proposal import ProposalGenerator, ProposalMapper, PersistentProposalList, flatten
 from tllib.alignment.d_adapt.feedback import get_detection_dataset_dicts, DatasetMapper
 
+import category_adaptation_new1
+import bbox_adaptation_new1
+
 sys.path.append('..')
 import utils
-
-import category_adaptation
-import bbox_adaptation
 
 
 def generate_proposals(model, num_classes, dataset_names, cache_root, cfg):
@@ -86,8 +86,13 @@ def generate_bounding_box_labels(prop, bbox_adaptor, class_names, cache_filename
 
 
 def train(model, logger, cfg, args, args_cls, args_box):
-    model.train()
+    
     distributed = comm.get_world_size() > 1
+    if distributed:
+        model = DistributedDataParallel(
+            model, device_ids=[comm.get_local_rank()], broadcast_buffers=False
+        )
+    model.train()
     if distributed:
         model_without_parallel = model.module
     else:
@@ -138,31 +143,33 @@ def train(model, logger, cfg, args, args_cls, args_box):
     prop_t_fg, prop_t_bg = generate_proposals(model, len(classes), args.targets, cache_proposal_root, cfg)
     prop_s_fg, prop_s_bg = generate_proposals(model, len(classes), args.sources, cache_proposal_root, cfg)
     model = model.to(torch.device('cpu'))
+    del model # del只是删除变量的引用，不能直接释放内存，通过del将变量的引用次数降低为-1，依靠内存回收机制自动回收
 
     # train the category adaptor
-    category_adaptor = category_adaptation.CategoryAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "cls"), args_cls)
-    # if not category_adaptor.load_checkpoint():
-    if True:
-        data_loader_source = category_adaptor.prepare_training_data(prop_s_fg + prop_s_bg, True)
-        data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False)
-        data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg)
-        category_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, distributed)
+    for cascade_id in range(1, args.num_cascade + 1):
+        category_adaptor = category_adaptation_new1.CategoryAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "cls_{}".format(cascade_id)), args_cls)
+        if not category_adaptor.load_checkpoint():
+        # if True:
+            data_loader_source = category_adaptor.prepare_training_data(prop_s_fg + prop_s_bg, True)
+            data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False)
+            data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg)
+            category_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, distributed)
 
-    # generate category labels for each proposals
-    cache_feedback_root = os.path.join(cfg.OUTPUT_DIR, "cache", "feedback")
-    prop_t_fg = generate_category_labels(
-        prop_t_fg, category_adaptor, os.path.join(cache_feedback_root, "{}_fg.json".format(args.targets[0]))
-    )
-    prop_t_bg = generate_category_labels(
-        prop_t_bg, category_adaptor, os.path.join(cache_feedback_root, "{}_bg.json".format(args.targets[0]))
-    )
-    category_adaptor.model.to(torch.device("cpu"))
+        # generate category labels for each proposals
+        cache_feedback_root = os.path.join(cfg.OUTPUT_DIR, "cache", "feedback")
+        prop_t_fg = generate_category_labels(
+            prop_t_fg, category_adaptor, os.path.join(cache_feedback_root, "{}_fg_{}.json".format(args.targets[0], cascade_id))
+        )
+        prop_t_bg = generate_category_labels(
+            prop_t_bg, category_adaptor, os.path.join(cache_feedback_root, "{}_bg_{}.json".format(args.targets[0], cascade_id))
+        )
+        category_adaptor.model.to(torch.device("cpu"))
 
-    if args.bbox_refine:
+    # for bbox_adaptor_id in range(1, args.num_category_cascade + 1):
         # train the bbox adaptor
-        bbox_adaptor = bbox_adaptation.BoundingBoxAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "bbox"), args_box)
-        # if not bbox_adaptor.load_checkpoint():
-        if True:
+        bbox_adaptor = bbox_adaptation_new1.BoundingBoxAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "bbox_{}".format(bbox_adaptor_id)), args_box)
+        if not bbox_adaptor.load_checkpoint():
+        # if True:
             data_loader_source = bbox_adaptor.prepare_training_data(prop_s_fg, True)
             data_loader_target = bbox_adaptor.prepare_training_data(prop_t_fg, False)
             data_loader_validation = bbox_adaptor.prepare_validation_data(prop_t_fg)
@@ -173,11 +180,11 @@ def train(model, logger, cfg, args, args_cls, args_box):
         cache_feedback_root = os.path.join(cfg.OUTPUT_DIR, "cache", "feedback_bbox")
         prop_t_fg_refined = generate_bounding_box_labels(
             prop_t_fg, bbox_adaptor, classes,
-            os.path.join(cache_feedback_root, "{}_fg.json".format(args.targets[0]))
+            os.path.join(cache_feedback_root, "{}_fg_{}.json".format(args.targets[0], cascade_id))
         )
         prop_t_bg_refined = generate_bounding_box_labels(
             prop_t_bg, bbox_adaptor, classes,
-            os.path.join(cache_feedback_root, "{}_bg.json".format(args.targets[0]))
+            os.path.join(cache_feedback_root, "{}_bg_{}.json".format(args.targets[0], cascade_id))
         )
         prop_t_fg += prop_t_fg_refined
         prop_t_bg += prop_t_bg_refined
@@ -270,11 +277,6 @@ def main(args, args_cls, args_box):
         )
         return utils.validate(model, logger, cfg, args)
 
-    distributed = comm.get_world_size() > 1
-    if distributed:
-        model = DistributedDataParallel(
-            model, device_ids=[comm.get_local_rank()], broadcast_buffers=False
-        )
 
     train(model, logger, cfg, args, args_cls, args_box)
 
@@ -283,15 +285,19 @@ def main(args, args_cls, args_box):
 
 
 if __name__ == "__main__":
-    args_cls, argv = category_adaptation.CategoryAdaptor.get_parser().parse_known_args()
+    args_cls, argv = category_adaptation_new1.CategoryAdaptor.get_parser().parse_known_args()
     print("Category Adaptation Args:")
     # pprint.pprint(args_cls)
 
-    args_box, argv = bbox_adaptation.BoundingBoxAdaptor.get_parser().parse_known_args(args=argv)
+    args_box, argv = bbox_adaptation_new1.BoundingBoxAdaptor.get_parser().parse_known_args(args=argv)
     print("Bounding Box Adaptation Args:")
     # pprint.pprint(args_box)
 
     parser = argparse.ArgumentParser(add_help=True)
+    parser.add_argument('--num-cascade', default=3., type=int, help='num_category_cascade')
+    # parser.add_argument('--num-bbox-cascade', default=1, type=int, help='num_bbox_cascade')
+
+
     # dataset parameters
     parser.add_argument('-s', '--sources', nargs='+', help='source domain(s)')
     parser.add_argument('-t', '--targets', nargs='+', help='target domain(s)')
@@ -349,3 +355,12 @@ if __name__ == "__main__":
         dist_url=args.dist_url,
         args=(args, args_cls, args_box),
     )
+
+    # launch(
+    #     main,
+    #     args.num_gpus,
+    #     num_machines=args.num_machines,
+    #     machine_rank=args.machine_rank,
+    #     dist_url=args.dist_url,
+    #     args=(args, args_cls, args_box),
+    # )

@@ -1,0 +1,29 @@
+arch_c: 'resnet101'
+batch_size_c: 96
+bottleneck_dim_c: 1024
+coefficient: 5
+confidence_ratio_c: 0.0
+entropy_c: False
+epochs_c: 10
+epsilon_c: 0.01
+ignored_ious_c: (0.4, 0.5)
+ignored_scores_c: [0.05, 0.3]
+iters_per_epoch_c: 1000
+iters_perepoch_mode: 'compute_from_epoch'
+log_c: 'cdan'
+lr: 0.01
+lr_decay_c: 0.75
+lr_gamma_c: 0.001
+max_train_c: 10
+max_val_c: 2
+momentum_c: 0.9
+no_pool_c: False
+print_freq_c: 100
+randomized_c: False
+randomized_dim_c: 1024
+resize_size_c: 112
+scratch_c: False
+seed_c: None
+trade_off_c: 1.0
+weight_decay: 0.001
+workers_c: 2

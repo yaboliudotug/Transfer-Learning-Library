@@ -1,35 +1,46 @@
 # ResNet101 Based Faster RCNN: Faster RCNN: VOC->Clipart
 # 44.8
-pretrained_models=../logs/source_only/faster_rcnn_R_101_C4/voc2clipart/model_final.pth
-CUDA_VISIBLE_DEVICES=3 python cascade_adapt.py --num-gpus 1 \
-  --config-file config/faster_rcnn_R_101_C4_voc.yaml \
-  -s VOC2007 ../datasets/VOC2007 VOC2012 ../datasets/VOC2012  \
-  -t Clipart ../datasets/clipart --test Clipart ../datasets/clipart \
-  --finetune --bbox-refine \
-  OUTPUT_DIR logs/faster_rcnn_R_101_C4/voc2clipart/phase1 MODEL.WEIGHTS ${pretrained_models} SEED 0
+# pretrained_models=../logs/source_only/faster_rcnn_R_101_C4/voc2clipart/model_final.pth
+# CUDA_VISIBLE_DEVICES=3 python cascade_adapt.py --num-gpus 1 \
+#   --config-file config/faster_rcnn_R_101_C4_voc.yaml \
+#   -s VOC2007 ../datasets/VOC2007 VOC2012 ../datasets/VOC2012  \
+#   -t Clipart ../datasets/clipart --test Clipart ../datasets/clipart \
+#   --finetune --bbox-refine \
+#   OUTPUT_DIR logs/faster_rcnn_R_101_C4/voc2clipart/phase1 MODEL.WEIGHTS ${pretrained_models} SEED 0
 
-# 47.9
-pretrained_models=logs/faster_rcnn_R_101_C4/voc2clipart/phase1/model_final.pth
-CUDA_VISIBLE_DEVICES=3 python cascade_adapt.py --num-gpus 1 --confidence-ratio-c 0.1 \
-  --config-file config/faster_rcnn_R_101_C4_voc.yaml \
-  -s VOC2007 ../datasets/VOC2007 VOC2012 ../datasets/VOC2012  \
-  -t Clipart ../datasets/clipart --test Clipart ../datasets/clipart \
-  --finetune --bbox-refine \
-  OUTPUT_DIR logs/faster_rcnn_R_101_C4/voc2clipart/phase2 MODEL.WEIGHTS ${pretrained_models} SEED 0
+# # 47.9
+# pretrained_models=logs/faster_rcnn_R_101_C4/voc2clipart/phase1/model_final.pth
+# CUDA_VISIBLE_DEVICES=3 python cascade_adapt.py --num-gpus 1 --confidence-ratio-c 0.1 \
+#   --config-file config/faster_rcnn_R_101_C4_voc.yaml \
+#   -s VOC2007 ../datasets/VOC2007 VOC2012 ../datasets/VOC2012  \
+#   -t Clipart ../datasets/clipart --test Clipart ../datasets/clipart \
+#   --finetune --bbox-refine \
+#   OUTPUT_DIR logs/faster_rcnn_R_101_C4/voc2clipart/phase2 MODEL.WEIGHTS ${pretrained_models} SEED 0
 
-# 49.0
-pretrained_models=logs/faster_rcnn_R_101_C4/voc2clipart/phase2/model_final.pth
+# # 49.0
+# pretrained_models=logs/faster_rcnn_R_101_C4/voc2clipart/phase2/model_final.pth
+# CUDA_VISIBLE_DEVICES=3 python cascade_adapt.py --num-gpus 1 --confidence-ratio-c 0.2 \
+#   --config-file config/faster_rcnn_R_101_C4_voc.yaml \
+#   -s VOC2007 ../datasets/VOC2007 VOC2012 ../datasets/VOC2012  \
+#   -t Clipart ../datasets/clipart --test Clipart ../datasets/clipart \
+#   --finetune --bbox-refine \
+#   --resume \
+#   OUTPUT_DIR logs/faster_rcnn_R_101_C4/voc2clipart/phase3 MODEL.WEIGHTS ${pretrained_models} SEED 0
+
+pretrained_models=logs/faster_rcnn_R_101_C4/voc2clipart/phase3/model_final.pth
 CUDA_VISIBLE_DEVICES=3 python cascade_adapt.py --num-gpus 1 --confidence-ratio-c 0.2 \
   --config-file config/faster_rcnn_R_101_C4_voc.yaml \
   -s VOC2007 ../datasets/VOC2007 VOC2012 ../datasets/VOC2012  \
   -t Clipart ../datasets/clipart --test Clipart ../datasets/clipart \
   --finetune --bbox-refine \
-  OUTPUT_DIR logs/faster_rcnn_R_101_C4/voc2clipart/phase3 MODEL.WEIGHTS ${pretrained_models} SEED 0
+  --resume \
+  OUTPUT_DIR logs/faster_rcnn_R_101_C4/voc2clipart/phase4 MODEL.WEIGHTS ${pretrained_models} SEED 0
+
 
 # # ResNet101 Based Faster RCNN: Faster RCNN: VOC->WaterColor
 # # 54.1
 # pretrained_models=../logs/source_only/faster_rcnn_R_101_C4/voc2watercolor_comic/model_final.pth
-# CUDA_VISIBLE_DEVICES=0,1,2,3 python d_adapt.py --num-gpus 4 \
+# CUDA_VISIBLE_DEVICES=2 python cascade_adapt.py --num-gpus 1 \
 #   --config-file config/faster_rcnn_R_101_C4_voc.yaml \
 #   -s VOC2007Partial ../datasets/VOC2007 VOC2012Partial ../datasets/VOC2012  \
 #   -t WaterColor ../datasets/watercolor --test WaterColorTest ../datasets/watercolor --finetune --bbox-refine \

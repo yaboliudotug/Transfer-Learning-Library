@@ -141,8 +141,8 @@ def train(model, logger, cfg, args, args_cls, args_box):
 
     # train the category adaptor
     category_adaptor = category_adaptation.CategoryAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "cls"), args_cls)
-    # if not category_adaptor.load_checkpoint():
-    if True:
+    if not category_adaptor.load_checkpoint():
+    # if True:
         data_loader_source = category_adaptor.prepare_training_data(prop_s_fg + prop_s_bg, True)
         data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False)
         data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg)
@@ -161,8 +161,8 @@ def train(model, logger, cfg, args, args_cls, args_box):
     if args.bbox_refine:
         # train the bbox adaptor
         bbox_adaptor = bbox_adaptation.BoundingBoxAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "bbox"), args_box)
-        # if not bbox_adaptor.load_checkpoint():
-        if True:
+        if not bbox_adaptor.load_checkpoint():
+        # if True:
             data_loader_source = bbox_adaptor.prepare_training_data(prop_s_fg, True)
             data_loader_target = bbox_adaptor.prepare_training_data(prop_t_fg, False)
             data_loader_validation = bbox_adaptor.prepare_validation_data(prop_t_fg)
@@ -285,11 +285,11 @@ def main(args, args_cls, args_box):
 if __name__ == "__main__":
     args_cls, argv = category_adaptation.CategoryAdaptor.get_parser().parse_known_args()
     print("Category Adaptation Args:")
-    # pprint.pprint(args_cls)
+    pprint.pprint(args_cls)
 
     args_box, argv = bbox_adaptation.BoundingBoxAdaptor.get_parser().parse_known_args(args=argv)
     print("Bounding Box Adaptation Args:")
-    # pprint.pprint(args_box)
+    pprint.pprint(args_box)
 
     parser = argparse.ArgumentParser(add_help=True)
     # dataset parameters
