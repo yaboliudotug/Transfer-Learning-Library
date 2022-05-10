@@ -39,12 +39,12 @@ CUDA_VISIBLE_DEVICES=3 python cascade_adapt.py --num-gpus 1 --confidence-ratio-c
 
 # # ResNet101 Based Faster RCNN: Faster RCNN: VOC->WaterColor
 # # 54.1
-# pretrained_models=../logs/source_only/faster_rcnn_R_101_C4/voc2watercolor_comic/model_final.pth
-# CUDA_VISIBLE_DEVICES=2 python cascade_adapt.py --num-gpus 1 \
-#   --config-file config/faster_rcnn_R_101_C4_voc.yaml \
-#   -s VOC2007Partial ../datasets/VOC2007 VOC2012Partial ../datasets/VOC2012  \
-#   -t WaterColor ../datasets/watercolor --test WaterColorTest ../datasets/watercolor --finetune --bbox-refine \
-#   OUTPUT_DIR logs/faster_rcnn_R_101_C4/voc2watercolor/phase1 MODEL.ROI_HEADS.NUM_CLASSES 6 MODEL.WEIGHTS ${pretrained_models} SEED 0
+pretrained_models=../logs/source_only/faster_rcnn_R_101_C4/voc2watercolor_comic/model_final.pth
+CUDA_VISIBLE_DEVICES=2 python cascade_adapt.py --num-gpus 1 \
+  --config-file config/faster_rcnn_R_101_C4_voc.yaml \
+  -s VOC2007Partial ../datasets/VOC2007 VOC2012Partial ../datasets/VOC2012  \
+  -t WaterColor ../datasets/watercolor --test WaterColorTest ../datasets/watercolor --finetune --bbox-refine \
+  OUTPUT_DIR logs/faster_rcnn_R_101_C4/voc2watercolor/phase1 MODEL.ROI_HEADS.NUM_CLASSES 6 MODEL.WEIGHTS ${pretrained_models} SEED 0
 
 # # 57.5
 # pretrained_models=logs/faster_rcnn_R_101_C4/voc2watercolor/phase1/model_final.pth
