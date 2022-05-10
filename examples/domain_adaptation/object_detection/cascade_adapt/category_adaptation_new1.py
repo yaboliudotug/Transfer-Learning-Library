@@ -49,6 +49,8 @@ class ConfidenceBasedDataSelector:
         self.scores = []
         self.category_names = category_names
         self.per_category_thresholds = None
+        print('>>>>>>>>')
+        print('confidence_ratio {}'.format(confidence_ratio))
 
     def extend(self, categories, scores):
         self.categories.extend(categories)
@@ -62,8 +64,9 @@ class ConfidenceBasedDataSelector:
         per_category_thresholds = {}
         print(per_category_scores.keys())
         for c, s in per_category_scores.items():
-            s.sort(reverse=True)
+            s.sort(reverse=True)    #降序
             print(c, len(s), int(self.confidence_ratio * len(s)))
+            # confidence_ratio按照score降序取百分比
             per_category_thresholds[c] = s[int(self.confidence_ratio * len(s))] if len(s) else 1.
 
         print('----------------------------------------------------')
@@ -108,9 +111,9 @@ class CategoryAdaptor:
         self.model = ImageClassifier(backbone, num_classes, bottleneck_dim=args.bottleneck_dim,
                                      pool_layer=pool_layer, finetune=not args.scratch).to(device)
 
-    def load_checkpoint(self):
-        if osp.exists(self.logger.get_checkpoint_path('latest')):
-            checkpoint = torch.load(self.logger.get_checkpoint_path('latest'), map_location='cpu')
+    def load_checkpoint(self, name='latest'):
+        if osp.exists(self.logger.get_checkpoint_path(name)):
+            checkpoint = torch.load(self.logger.get_checkpoint_path(name), map_location='cpu')
             self.model.load_state_dict(checkpoint)
             return True
         else:
@@ -240,6 +243,7 @@ class CategoryAdaptor:
 
         # start training
         best_acc1 = 0.
+        best_epoch = 0
         num_iters_source = len(iter_source)
         num_iters_target = len(iter_target)
         # print('>>>>>>>>')
@@ -273,12 +277,14 @@ class CategoryAdaptor:
                 x_t, labels_t = next(iter_target)
 
                 # assign pseudo labels for target-domain proposals with extremely high confidence
+                # 根据提前计算的confidence-ratio计算出的可选择置信度阈值，来选取当前target batch中的可用样本
                 selected = torch.tensor(
                     self.selector.whether_select(
                         labels_t['pred_classes'].numpy().tolist(),
                         labels_t['pred_scores'].numpy().tolist()
                     )
                 )
+                # 将小置信度的样本设置为-1类背景
                 pseudo_classes_t = selected * labels_t['pred_classes'] + (~selected) * -1
                 pseudo_classes_t = pseudo_classes_t.to(device)
 
@@ -327,12 +333,14 @@ class CategoryAdaptor:
                 acc1 = self.validate(data_loader_validation, model, self.class_names, args)
                 if acc1 > best_acc1:
                     torch.save(model.state_dict(), self.logger.get_checkpoint_path('best'))
-                best_acc1 = max(acc1, best_acc1)
+                    print('best acc at epoch {} update to {}'.format(epoch, acc1))
+                    best_epoch = epoch
+                    best_acc1 = acc1
 
             # save checkpoint
             torch.save(model.state_dict(), self.logger.get_checkpoint_path('latest'))
 
-        print("best_acc1 = {:3.1f}".format(best_acc1))
+        print("best_acc1 = {:3.1f} ad epoch {}".format(best_acc1, best_epoch))
         domain_adv.to(torch.device("cpu"))
         self.logger.logger.flush()
 
@@ -411,6 +419,12 @@ class CategoryAdaptor:
                             help='backbone architecture: ' +
                                  ' | '.join(utils.get_model_names()) +
                                  ' (default: resnet101)')
+        # parser.add_argument('--arch-c', metavar='ARCH', default='resnet50',
+        #                     choices=utils.get_model_names(),
+        #                     help='backbone architecture: ' +
+        #                          ' | '.join(utils.get_model_names()) +
+        #                          ' (default: resnet101)')
+
         parser.add_argument('--bottleneck-dim-c', default=1024, type=int,
                             help='Dimension of bottleneck')
         parser.add_argument('--no-pool-c', action='store_true',
@@ -447,9 +461,9 @@ class CategoryAdaptor:
                             help='Number of iterations per epoch')
         parser.add_argument('--iters-perepoch-mode', default='compute_from_epoch', type=str,
                             help='iters-perepoch-mode')    
-        parser.add_argument('--coefficient', default=5, type=int,
+        parser.add_argument('--coefficient', default=10, type=int,
                             help='iters-perepoch-mode coefficient')                   
-        parser.add_argument('--print-freq-c', default=100, type=int,
+        parser.add_argument('--print-freq-c', default=10, type=int,
                             metavar='N', help='print frequency (default: 100)')
         parser.add_argument('--seed-c', default=None, type=int,
                             help='seed for initializing training. ')

@@ -154,9 +154,9 @@ class BoundingBoxAdaptor:
         ).to(device)
         self.box_transform = BoxTransform()
 
-    def load_checkpoint(self, path=None):
+    def load_checkpoint(self, path=None, name='latest'):
         if path is None:
-            path = self.logger.get_checkpoint_path('latest')
+            path = self.logger.get_checkpoint_path(name)
         if osp.exists(path):
             checkpoint = torch.load(path, map_location='cpu')
             self.model.load_state_dict(checkpoint)
@@ -530,7 +530,7 @@ class BoundingBoxAdaptor:
                             help='mini-batch size (default: 64)') # 32
         parser.add_argument('--iters-perepoch-mode', default='compute_from_epoch', type=str,
                             help='iters-perepoch-mode')     
-        parser.add_argument('--coefficient', default=5, type=int,
+        parser.add_argument('--coefficient', default=10, type=int,
                             help='iters-perepoch-mode coefficient')                        
         parser.add_argument('--lr-b', default=0.004, type=float,
                             metavar='LR', help='initial learning rate')

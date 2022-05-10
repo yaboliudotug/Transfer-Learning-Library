@@ -30,11 +30,13 @@ import tllib.alignment.d_adapt.modeling.meta_arch as models
 from tllib.alignment.d_adapt.proposal import ProposalGenerator, ProposalMapper, PersistentProposalList, flatten
 from tllib.alignment.d_adapt.feedback import get_detection_dataset_dicts, DatasetMapper
 
-import category_adaptation_new1
-import bbox_adaptation_new1
+
 
 sys.path.append('..')
 import utils
+
+import category_adaptation_new1
+import bbox_adaptation_new1
 
 
 def generate_proposals(model, num_classes, dataset_names, cache_root, cfg):
@@ -148,8 +150,8 @@ def train(model, logger, cfg, args, args_cls, args_box):
     # train the category adaptor
     for cascade_id in range(1, args.num_cascade + 1):
         category_adaptor = category_adaptation_new1.CategoryAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "cls_{}".format(cascade_id)), args_cls)
-        if not category_adaptor.load_checkpoint():
-        # if True:
+        # if not category_adaptor.load_checkpoint():
+        if True:
             data_loader_source = category_adaptor.prepare_training_data(prop_s_fg + prop_s_bg, True)
             data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False)
             data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg)
@@ -157,6 +159,11 @@ def train(model, logger, cfg, args, args_cls, args_box):
 
         # generate category labels for each proposals
         cache_feedback_root = os.path.join(cfg.OUTPUT_DIR, "cache", "feedback")
+        if args.use_best_category == 'best':
+            print('loading best category adaptor...')
+            category_adaptor.load_checkpoint(name='best')
+            category_adaptor.model.cuda()
+            print('loading done.')
         prop_t_fg = generate_category_labels(
             prop_t_fg, category_adaptor, os.path.join(cache_feedback_root, "{}_fg_{}.json".format(args.targets[0], cascade_id))
         )
@@ -167,9 +174,9 @@ def train(model, logger, cfg, args, args_cls, args_box):
 
     # for bbox_adaptor_id in range(1, args.num_category_cascade + 1):
         # train the bbox adaptor
-        bbox_adaptor = bbox_adaptation_new1.BoundingBoxAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "bbox_{}".format(bbox_adaptor_id)), args_box)
-        if not bbox_adaptor.load_checkpoint():
-        # if True:
+        bbox_adaptor = bbox_adaptation_new1.BoundingBoxAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "bbox_{}".format(cascade_id)), args_box)
+        # if not bbox_adaptor.load_checkpoint():
+        if True:
             data_loader_source = bbox_adaptor.prepare_training_data(prop_s_fg, True)
             data_loader_target = bbox_adaptor.prepare_training_data(prop_t_fg, False)
             data_loader_validation = bbox_adaptor.prepare_validation_data(prop_t_fg)
@@ -178,6 +185,11 @@ def train(model, logger, cfg, args, args_cls, args_box):
 
         # generate bounding box labels for each proposals
         cache_feedback_root = os.path.join(cfg.OUTPUT_DIR, "cache", "feedback_bbox")
+        if args.use_best_bbox == 'best':
+            print('loading best bbox adaptor...')
+            bbox_adaptor.load_checkpoint(name='best')
+            bbox_adaptor.model.cuda()
+            print('loading done.')
         prop_t_fg_refined = generate_bounding_box_labels(
             prop_t_fg, bbox_adaptor, classes,
             os.path.join(cache_feedback_root, "{}_fg_{}.json".format(args.targets[0], cascade_id))
@@ -294,9 +306,9 @@ if __name__ == "__main__":
     # pprint.pprint(args_box)
 
     parser = argparse.ArgumentParser(add_help=True)
-    parser.add_argument('--num-cascade', default=3., type=int, help='num_category_cascade')
-    # parser.add_argument('--num-bbox-cascade', default=1, type=int, help='num_bbox_cascade')
-
+    parser.add_argument('--num-cascade', default=3, type=int, help='num_category_cascade')
+    parser.add_argument('--use-best-category', default='best', type=str, help='use-best')
+    parser.add_argument('--use-best-bbox', default='best', type=str, help='use-best')
 
     # dataset parameters
     parser.add_argument('-s', '--sources', nargs='+', help='source domain(s)')
