@@ -54,6 +54,15 @@ def generate_proposals(model, num_classes, dataset_names, cache_root, cfg):
         bg_proposals_list.flush()
     return fg_proposals_list, bg_proposals_list
 
+def show_gt_pred(proposal_list, save_dir, label):
+    if os.path.exists(save_dir):
+        return
+    os.makedirs(save_dir)
+    for i in proposal_list:
+        print(i)
+        exit()
+
+
 
 def generate_category_labels(prop, category_adaptor, cache_filename):
     """Generate category labels for each proposals in `prop` and save them to the disk"""
@@ -145,13 +154,17 @@ def train(model, logger, cfg, args, args_cls, args_box):
     prop_t_fg, prop_t_bg = generate_proposals(model, len(classes), args.targets, cache_proposal_root, cfg)
     prop_s_fg, prop_s_bg = generate_proposals(model, len(classes), args.sources, cache_proposal_root, cfg)
     model = model.to(torch.device('cpu'))
+    if args.show_gt == 'show_gt':
+        gt_pred_show_root = os.path.join(cfg.OUTPUT_DIR, "cache", "show_gt_pred")
+        show_gt_pred(prop_t_fg, os.path.join(gt_pred_show_root, 'target'), label=False)
+        show_gt_pred(prop_s_fg, os.path.join(gt_pred_show_root, 'source'), label=True) 
     del model # del只是删除变量的引用，不能直接释放内存，通过del将变量的引用次数降低为-1，依靠内存回收机制自动回收
 
     # train the category adaptor
     for cascade_id in range(1, args.num_cascade + 1):
         category_adaptor = category_adaptation_new1.CategoryAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "cls_{}".format(cascade_id)), args_cls)
-        # if not category_adaptor.load_checkpoint():
-        if True:
+        if not category_adaptor.load_checkpoint():
+        # if True:
             data_loader_source = category_adaptor.prepare_training_data(prop_s_fg + prop_s_bg, True)
             data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False)
             data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg)
@@ -309,6 +322,10 @@ if __name__ == "__main__":
     parser.add_argument('--num-cascade', default=3, type=int, help='num_category_cascade')
     parser.add_argument('--use-best-category', default='best', type=str, help='use-best')
     parser.add_argument('--use-best-bbox', default='best', type=str, help='use-best')
+    parser.add_argument('--show-gt', default='show_gt', type=str, help='show_gt')
+
+
+
 
     # dataset parameters
     parser.add_argument('-s', '--sources', nargs='+', help='source domain(s)')
