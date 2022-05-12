@@ -2,6 +2,7 @@
 @author: Junguang Jiang
 @contact: JiangJunguang1123@outlook.com
 """
+from pickle import NONE
 import torch
 import copy
 import numpy as np
@@ -138,6 +139,12 @@ class ProposalGenerator(DatasetEvaluator):
                 proposal.gt_ious = gt_ious.numpy()
                 proposal.gt_boxes = input_instance.gt_boxes[gt_classes_idx].tensor.numpy()
 
+            if gt_boxes.tensor.shape[0] == 0:
+                proposal.all_gt_classes = proposal.all_gt_boxes = np.array([])
+            else:
+                proposal.all_gt_classes = input_instance.gt_classes.tensor.numpy()
+                proposal.all_gt_boxes = input_instance.gt_boxes.tensor.numpy()
+
         return proposal
 
     def process(self, inputs, outputs):
@@ -165,7 +172,7 @@ class Proposal:
 
     """
     def __init__(self, image_id, filename, pred_boxes, pred_classes, pred_scores,
-                 gt_classes=None, gt_boxes=None, gt_ious=None, gt_fg_classes=None):
+                 gt_classes=None, gt_boxes=None, gt_ious=None, gt_fg_classes=None, all_gt_classes=None, all_gt_boxes=None):
         self.image_id = image_id
         self.filename = filename
         self.pred_boxes = pred_boxes
@@ -175,6 +182,8 @@ class Proposal:
         self.gt_boxes = gt_boxes
         self.gt_ious = gt_ious
         self.gt_fg_classes = gt_fg_classes
+        self.all_gt_classes = all_gt_classes
+        self.all_gt_boxes = all_gt_boxes
 
     def to_dict(self):
         return {
@@ -187,7 +196,9 @@ class Proposal:
             "gt_classes": self.gt_classes.tolist(),
             "gt_boxes": self.gt_boxes.tolist(),
             "gt_ious": self.gt_ious.tolist(),
-            "gt_fg_classes": self.gt_fg_classes.tolist()
+            "gt_fg_classes": self.gt_fg_classes.tolist(),
+            "all_gt_boxes": self.all_gt_boxes.tolist(),
+            "all_gt_classes": self.all_gt_classes.tolist()
         }
 
     def __str__(self):
@@ -207,7 +218,9 @@ class Proposal:
             gt_classes=self.gt_classes[item],
             gt_boxes=self.gt_boxes[item],
             gt_ious=self.gt_ious[item],
-            gt_fg_classes=self.gt_fg_classes[item]
+            gt_fg_classes=self.gt_fg_classes[item],
+            all_gt_boxes=self.all_gt_boxes[item],
+            all_gt_classes=self.all_gt_classes[item]
         )
 
 
@@ -309,6 +322,65 @@ class ProposalDataset(datasets.VisionDataset):
 
         # random sample a proposal
         proposal = proposals[random.randint(0, len(proposals)-1)]
+        image_width, image_height = img.width, img.height
+        # proposal_dict = proposal.to_dict()
+        # proposal_dict.update(width=img.width, height=img.height)
+
+        # crop the proposal from the whole image
+        x1, y1, x2, y2 = proposal.pred_boxes
+        top, left, height, width = int(y1), int(x1), int(y2 - y1), int(x2 - x1)
+        if self.crop_func is not None:
+            top, left, height, width = self.crop_func(img, top, left, height, width)
+        img = crop(img, top, left, height, width)
+
+        if self.transform is not None:
+            img = self.transform(img)
+
+        return img, {
+            "image_id": proposal.image_id,
+            "filename": proposal.filename,
+            "pred_boxes": proposal.pred_boxes.astype(np.float),
+            "pred_classes": proposal.pred_classes.astype(np.long),
+            "pred_scores": proposal.pred_scores.astype(np.float),
+            "gt_classes": proposal.gt_classes.astype(np.long),
+            "gt_boxes": proposal.gt_boxes.astype(np.float),
+            "gt_ious": proposal.gt_ious.astype(np.float),
+            "gt_fg_classes": proposal.gt_fg_classes.astype(np.long),
+            "width": image_width,
+            "height": image_height
+        }
+
+    def __len__(self):
+        return len(self.proposal_list)
+
+class ProposalDatasetTest(datasets.VisionDataset):
+    """
+    A dataset for proposals.
+
+    Args:
+        proposal_list (list): list of Proposal
+        transform (callable, optional): A function/transform that  takes in an PIL image
+            and returns a transformed version. E.g, ``transforms.RandomCrop``
+        crop_func: (ExpandCrop, optional):
+    """
+    def __init__(self, proposal_list: List[Proposal], transform: Optional[Callable] = None, crop_func=None):
+        super(ProposalDataset, self).__init__("", transform=transform)
+        proposal_list_ls = list(filter(lambda p: len(p) > 0, proposal_list))  # remove images without proposals
+        self.loader = default_loader
+        self.crop_func = crop_func
+        proposal_list = []
+        for proposals in proposal_list_ls:
+            for i in range(len(proposals)):
+                self.proposal_list.append(proposals[i])
+        self.proposal_list = proposal_list
+
+    def __getitem__(self, index: int):
+        # get proposals for the index-th image
+        proposal = self.proposal_list[index]
+        img = self.loader(proposal.filename)
+
+        # random sample a proposal
+        # proposal = proposals[random.randint(0, len(proposals)-1)]
         image_width, image_height = img.width, img.height
         # proposal_dict = proposal.to_dict()
         # proposal_dict.update(width=img.width, height=img.height)

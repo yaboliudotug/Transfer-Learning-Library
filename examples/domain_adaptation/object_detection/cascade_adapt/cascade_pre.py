@@ -153,6 +153,7 @@ def train(model, logger, cfg, args, args_cls, args_box):
     cache_proposal_root = os.path.join(cfg.OUTPUT_DIR, "cache", "proposal")
     prop_t_fg, prop_t_bg = generate_proposals(model, len(classes), args.targets, cache_proposal_root, cfg)
     prop_s_fg, prop_s_bg = generate_proposals(model, len(classes), args.sources, cache_proposal_root, cfg)
+    prop_test_fg, prop_test_bg = generate_proposals(model, len(classes), args.test, cache_proposal_root, cfg)
     model = model.to(torch.device('cpu'))
     if args.show_gt == 'show_gt':
         gt_pred_show_root = os.path.join(cfg.OUTPUT_DIR, "cache", "show_gt_pred")
@@ -168,13 +169,15 @@ def train(model, logger, cfg, args, args_cls, args_box):
             data_loader_source = category_adaptor.prepare_training_data(prop_s_fg + prop_s_bg, True)
             data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False)
             data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg)
-            category_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, distributed)
+            data_loader_test = category_adaptor.prepare_validation_data(prop_test_fg + prop_test_bg)
+            # 使用source domain的proposal进行训练，而不仅仅是gt，因为gt数量过少，且不具有roi的特征代表性
+            category_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, data_loader_test, distributed)
 
         # generate category labels for each proposals
         cache_feedback_root = os.path.join(cfg.OUTPUT_DIR, "cache", "feedback")
-        if args.use_best_category == 'best':
+        if args.use_best_category is not None:
             print('loading best category adaptor...')
-            category_adaptor.load_checkpoint(name='best')
+            category_adaptor.load_checkpoint(name=args.use_best_category)
             category_adaptor.model.cuda()
             print('loading done.')
         prop_t_fg = generate_category_labels(
@@ -183,6 +186,7 @@ def train(model, logger, cfg, args, args_cls, args_box):
         prop_t_bg = generate_category_labels(
             prop_t_bg, category_adaptor, os.path.join(cache_feedback_root, "{}_bg_{}.json".format(args.targets[0], cascade_id))
         )
+        # 在此加入两个数据集的评估结果
         category_adaptor.model.to(torch.device("cpu"))
 
     # for bbox_adaptor_id in range(1, args.num_category_cascade + 1):
@@ -198,9 +202,9 @@ def train(model, logger, cfg, args, args_cls, args_box):
 
         # generate bounding box labels for each proposals
         cache_feedback_root = os.path.join(cfg.OUTPUT_DIR, "cache", "feedback_bbox")
-        if args.use_best_bbox == 'best':
+        if args.use_best_bbox is not None:
             print('loading best bbox adaptor...')
-            bbox_adaptor.load_checkpoint(name='best')
+            bbox_adaptor.load_checkpoint(name=args.use_best_bbox)
             bbox_adaptor.model.cuda()
             print('loading done.')
         prop_t_fg_refined = generate_bounding_box_labels(
@@ -320,8 +324,8 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(add_help=True)
     parser.add_argument('--num-cascade', default=3, type=int, help='num_category_cascade')
-    parser.add_argument('--use-best-category', default='best', type=str, help='use-best')
-    parser.add_argument('--use-best-bbox', default='best', type=str, help='use-best')
+    parser.add_argument('--use-best-category', default='best_test', type=str, help='use-best')
+    parser.add_argument('--use-best-bbox', default='best_test', type=str, help='use-best')
     parser.add_argument('--show-gt', default='show_gt', type=str, help='show_gt')
 
 

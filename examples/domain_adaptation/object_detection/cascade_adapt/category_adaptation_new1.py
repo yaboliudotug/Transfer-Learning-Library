@@ -29,7 +29,7 @@ import detectron2.utils.comm as comm
 sys.path.append('../../../..')
 from tllib.modules.domain_discriminator import DomainDiscriminator
 from tllib.alignment.cdan import ConditionalDomainAdversarialLoss, ImageClassifier
-from tllib.alignment.d_adapt.proposal import ProposalDataset, flatten, Proposal
+from tllib.alignment.d_adapt.proposal import ProposalDataset, ProposalDatasetTest, flatten, Proposal
 from tllib.utils.data import ForeverDataIterator
 from tllib.utils.metric import accuracy, ConfusionMatrix
 from tllib.utils.meter import AverageMeter, ProgressMeter
@@ -176,7 +176,8 @@ class CategoryAdaptor:
             filtered_proposals_list.append(proposals[keep_indices])
 
         filtered_proposals_list = flatten(filtered_proposals_list, self.args.max_val)
-        dataset = ProposalDataset(filtered_proposals_list, transform)
+        # dataset = ProposalDataset(filtered_proposals_list, transform)
+        dataset = ProposalDatasetTest(filtered_proposals_list, transform)   # !!!!!
         dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
                                 shuffle=False, num_workers=self.args.workers, drop_last=False)
         return dataloader
@@ -194,7 +195,7 @@ class CategoryAdaptor:
                                 shuffle=False, num_workers=self.args.workers, drop_last=False)
         return dataloader
 
-    def fit(self, data_loader_source, data_loader_target, data_loader_validation=None, distributed=False):
+    def fit(self, data_loader_source, data_loader_target, data_loader_validation=None, data_loader_test=None, distributed=False):
         """When no labels exists on target domain, please set data_loader_validation=None"""
         args = self.args
         if args.seed is not None:
@@ -242,7 +243,8 @@ class CategoryAdaptor:
             )
 
         # start training
-        best_acc1 = 0.
+        best_acc1_target = 0.
+        best_acc1_test = 0.
         best_epoch = 0
         num_iters_source = len(iter_source)
         num_iters_target = len(iter_target)
@@ -331,16 +333,25 @@ class CategoryAdaptor:
             # evaluate on validation set
             if data_loader_validation is not None:
                 acc1 = self.validate(data_loader_validation, model, self.class_names, args)
-                if acc1 > best_acc1:
-                    torch.save(model.state_dict(), self.logger.get_checkpoint_path('best'))
+                if acc1 > best_acc1_target:
+                    torch.save(model.state_dict(), self.logger.get_checkpoint_path('best_target'))
                     print('best acc at epoch {} update to {}'.format(epoch, acc1))
                     best_epoch = epoch
-                    best_acc1 = acc1
+                    best_acc1_target = acc1
+            if data_loader_test is not None:
+                acc1 = self.validate(data_loader_test, model, self.class_names, args)
+                if acc1 > best_acc1_test:
+                    torch.save(model.state_dict(), self.logger.get_checkpoint_path('best_test'))
+                    print('best acc at epoch {} update to {}'.format(epoch, acc1))
+                    best_epoch = epoch
+                    best_acc1_test = acc1
+                
 
             # save checkpoint
             torch.save(model.state_dict(), self.logger.get_checkpoint_path('latest'))
 
-        print("best_acc1 = {:3.1f} ad epoch {}".format(best_acc1, best_epoch))
+        print("best_acc1 = {:3.1f} ad epoch {}".format(best_acc1_target, best_epoch))
+        print("best_acc1_test = {:3.1f} ad epoch {}".format(best_acc1_test, best_epoch))
         domain_adv.to(torch.device("cpu"))
         self.logger.logger.flush()
 
