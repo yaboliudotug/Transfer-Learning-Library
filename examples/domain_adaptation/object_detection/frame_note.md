@@ -1,5 +1,6 @@
 # dataset
-1. detectron2采用注册器机制，
+1. detectron采用注册器机制，有两个主要的注册器，MetadataCatalog和DatasetCatalog，前者存储每个数据集对应的类别信息，后者存储数据集的图像路径和标注信息
+2. 在tllib中，定义自定义数据集类别，在初始化数据集类别时，通过调用register_pascal_voc将该数据集注册至MetadataCatalog和DatasetCatalog，其中DatasetCatalog注册的不是全部的数据，而是数据加载函数，这样做的目的是，不在项目启动时就将大量的数据加载而消耗数据，而是在确实使用到该数据时，通过调用数据加载函数再将需要的数据加载至内存。
 args.sources = utils.build_dataset(args.sources[::2], args.sources[1::2])返回的就是该注册器内的注册对象
 DatasetCatalog的注册的数据集格式list(dict)：
 r = {

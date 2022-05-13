@@ -10,6 +10,7 @@ import sys
 import pprint
 from time import sleep
 import numpy as np
+import cv2
 
 import torch
 from torch.nn.parallel import DistributedDataParallel
@@ -54,13 +55,38 @@ def generate_proposals(model, num_classes, dataset_names, cache_root, cfg):
         bg_proposals_list.flush()
     return fg_proposals_list, bg_proposals_list
 
-def show_gt_pred(proposal_list, save_dir, label):
+def show_gt_pred(proposal_list, gt_list, class_names, save_dir, label, scale=0.5):
     if os.path.exists(save_dir):
         return
     os.makedirs(save_dir)
-    for i in proposal_list:
-        print(i)
-        exit()
+    palette = {'red': (0, 0, 255), 'green': (0, 255, 0), 'blue': (255, 0, 0)}
+    img_height, img_width = 0, 0
+    for proposals, gt in zip(proposal_list, gt_list):
+        gt_classes, gt_bboxes = gt
+        file_path = proposals.filename
+        print(file_path)
+        img_np = cv2.imread(file_path)
+        img_height = img_np.shape[0]
+        img_width = img_np.shape[1]
+        for idx in range(len(gt_classes)):
+            class_id, bbox = gt_classes[idx], gt_bboxes[idx]
+            class_name = class_names[class_id]
+            cv2.rectangle(img_np, (bbox[0], bbox[1]), (bbox[2], bbox[3]), palette['blue'], 2) 
+            cv2.putText(img_np, '{}'.format(class_name), (bbox[2] + 2, bbox[1] + 2), cv2.FONT_HERSHEY_COMPLEX,
+                            0.7, palette['blue'], 1)
+        for idx in range(len(proposals.pred_classes)):
+            pred_box=proposals.pred_boxes[idx]
+            pred_class=proposals.pred_boxes[idx]
+            pred_score=proposals.pred_scores[idx]
+            pred_class_name = class_names[pred_class]
+            cv2.rectangle(img_np, (pred_box[0], pred_box[1]), (pred_box[2], pred_box[3]), palette['red'], 2) 
+            cv2.putText(img_np, '{}_{:.2f}'.format(pred_class_name, pred_score), (pred_box[2] + 2, pred_box[1] + 2), cv2.FONT_HERSHEY_COMPLEX,
+                            0.7, palette['red'], 1)
+    
+    img_np = cv2.resize(img_np, (int(img_height * scale), int(img_width * scale)))
+    cv2.imwrite(os.path.join(save_dir, os.path.basename(file_path)), img_np)
+
+
 
 
 
@@ -192,13 +218,14 @@ def train(model, logger, cfg, args, args_cls, args_box):
     # for bbox_adaptor_id in range(1, args.num_category_cascade + 1):
         # train the bbox adaptor
         bbox_adaptor = bbox_adaptation_new1.BoundingBoxAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "bbox_{}".format(cascade_id)), args_box)
-        # if not bbox_adaptor.load_checkpoint():
-        if True:
+        if not bbox_adaptor.load_checkpoint():
+        # if True:
             data_loader_source = bbox_adaptor.prepare_training_data(prop_s_fg, True)
             data_loader_target = bbox_adaptor.prepare_training_data(prop_t_fg, False)
             data_loader_validation = bbox_adaptor.prepare_validation_data(prop_t_fg)
+            data_loader_test = bbox_adaptor.prepare_validation_data(prop_test_fg)
             bbox_adaptor.validate_baseline(data_loader_validation)
-            bbox_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation)
+            bbox_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, data_loader_test)
 
         # generate bounding box labels for each proposals
         cache_feedback_root = os.path.join(cfg.OUTPUT_DIR, "cache", "feedback_bbox")

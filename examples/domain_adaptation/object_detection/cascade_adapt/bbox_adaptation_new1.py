@@ -5,6 +5,7 @@ Training a bounding box adaptor
 """
 import random
 import time
+from tkinter.messagebox import NO
 import warnings
 import os.path as osp
 import argparse
@@ -26,7 +27,7 @@ from tllib.utils.meter import AverageMeter, ProgressMeter
 from tllib.utils.logger import CompleteLogger
 from tllib.modules.regressor import Regressor
 from tllib.alignment.mdd import ImageRegressor, RegressionMarginDisparityDiscrepancy
-from tllib.alignment.d_adapt.proposal import ProposalDataset, PersistentProposalList, flatten, ExpandCrop
+from tllib.alignment.d_adapt.proposal import ProposalDataset, PersistentProposalList, ProposalDatasetTest, flatten, ExpandCrop
 
 import utils
 
@@ -192,8 +193,6 @@ class BoundingBoxAdaptor:
         dataset = ProposalDataset(filtered_proposals_list, transform, crop_func=ExpandCrop(self.args.expand))
         dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
                                 shuffle=True, num_workers=self.args.workers, drop_last=True)
-        print('******')
-        print(self.args.batch_size)
         return dataloader
 
     def prepare_validation_data(self, proposal_list: PersistentProposalList):
@@ -212,7 +211,8 @@ class BoundingBoxAdaptor:
             filtered_proposals_list.append(proposals[keep_indices])
 
         filtered_proposals_list = flatten(filtered_proposals_list, self.args.max_val)
-        dataset = ProposalDataset(filtered_proposals_list, transform, crop_func=ExpandCrop(self.args.expand))
+        # dataset = ProposalDataset(filtered_proposals_list, transform, crop_func=ExpandCrop(self.args.expand))
+        dataset = ProposalDatasetTest(filtered_proposals_list, transform, crop_func=ExpandCrop(self.args.expand))
         dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
                                 shuffle=False, num_workers=self.args.workers, drop_last=False)
         return dataloader
@@ -299,7 +299,7 @@ class BoundingBoxAdaptor:
 
         return ious.avg
 
-    def fit(self, data_loader_source, data_loader_target, data_loader_validation=None):
+    def fit(self, data_loader_source, data_loader_target, data_loader_validation=None, data_loader_test=None):
         """When no labels exists on target domain, please set data_loader_validation=None"""
         args = self.args
         print(args)
@@ -320,6 +320,9 @@ class BoundingBoxAdaptor:
 
 
         best_iou = 0.
+        best_iou_test = 0.
+        best_epoch_target = 0
+        best_epoch_test = 0
         box_transform = self.box_transform
 
         # first pre-train on the source domain
@@ -393,6 +396,9 @@ class BoundingBoxAdaptor:
             # evaluate on validation set
             if data_loader_validation is not None:
                 iou = self.validate(data_loader_validation, model, box_transform, args)
+                best_iou = max(iou, best_iou)
+            if data_loader_test is not None:
+                iou = self.validate(data_loader_test, model, box_transform, args)
                 best_iou = max(iou, best_iou)
 
         model.to(torch.device("cpu"))
@@ -490,12 +496,24 @@ class BoundingBoxAdaptor:
             # evaluate on validation set
             if data_loader_validation is not None:
                 iou = self.validate(data_loader_validation, model, box_transform, args)
-                best_iou = max(iou, best_iou)
+                if iou > best_iou:
+                    torch.save(model.state_dict(), self.logger.get_checkpoint_path('best_target'))
+                    print('best iou at epoch {} update to {}'.format(epoch, best_iou))
+                    best_iou = iou
+                    best_epoch_target = epoch
+            if data_loader_test is not None:
+                iou = self.validate(data_loader_test, model, box_transform, args)
+                if iou > best_iou_test:
+                    torch.save(model.state_dict(), self.logger.get_checkpoint_path('best_test'))
+                    print('best best_iou_test at epoch {} update to {}'.format(epoch, best_iou_test))
+                    best_iou_test = iou
+                    best_epoch_test = epoch
 
             # save checkpoint
             torch.save(model.state_dict(), self.logger.get_checkpoint_path('latest'))
 
-        print("best_iou = {:3.1f}".format(best_iou))
+        print("best_iou_target = {:3.1f} at epoch {}".format(best_iou, best_epoch_target))
+        print("best_iou_test = {:3.1f} at epoch {}".format(best_iou_test, best_epoch_test))
 
         self.logger.logger.flush()
 
