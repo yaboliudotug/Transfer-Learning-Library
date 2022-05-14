@@ -31,7 +31,7 @@ from tllib.modules.domain_discriminator import DomainDiscriminator
 from tllib.alignment.cdan import ConditionalDomainAdversarialLoss, ImageClassifier
 from tllib.alignment.d_adapt.proposal import ProposalDataset, ProposalDatasetTest, flatten, Proposal
 from tllib.utils.data import ForeverDataIterator
-from tllib.utils.metric import accuracy, ConfusionMatrix
+from tllib.utils.metric import accuracy, ConfusionMatrix, compute_confusionmatrix
 from tllib.utils.meter import AverageMeter, ProgressMeter
 from tllib.utils.logger import CompleteLogger
 from tllib.vision.transforms import ResizeImage
@@ -425,6 +425,9 @@ class CategoryAdaptor:
 
             print(' * Acc@1 {top1.avg:.3f}'.format(top1=top1))
             print(confmat.format(class_names+["bg"]))
+            confusion_res = compute_confusionmatrix(gt_ls, pred_class_ls, pred_score_ls, \
+                class_names+['bg'], score_thresholds=[0, 0.5, 0.8, 0.9, 0.95, 0.97, 0.98, 0.99])
+            print(confusion_res)
 
         return top1.avg
 
