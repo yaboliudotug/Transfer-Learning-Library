@@ -61,9 +61,10 @@ def generate_proposals(model, num_classes, dataset_names, cache_root, cfg):
 def show_gt_pred(proposal_list, class_names, save_dir, scale=0.5):
     if os.path.exists(save_dir):
         return
-    # if os.path.exists(save_dir):
-    #     shutil.rmtree(save_dir)
-    # os.makedirs(save_dir, exist_ok=True)
+    if os.path.exists(save_dir):
+        shutil.rmtree(save_dir)
+    os.makedirs(save_dir, exist_ok=True)
+    print(save_dir)
     palette = {'red': (0, 0, 255), 'green': (0, 255, 0), 'blue': (255, 0, 0)}
     class_names = class_names + ['bg']
     img_height, img_width = 0, 0
@@ -186,9 +187,10 @@ def train(model, logger, cfg, args, args_cls, args_box):
     model = model.to(torch.device('cpu'))
     if args.show_gt == 'show_gt':
         gt_pred_show_root = os.path.join(cfg.OUTPUT_DIR, "cache", "show_gt_pred")
-        show_gt_pred(prop_test_fg, classes, os.path.join(gt_pred_show_root, 'test'), scale=0.6) 
-        show_gt_pred(prop_s_fg, classes, os.path.join(gt_pred_show_root, 'source'), scale=0.6) 
-        show_gt_pred(prop_t_fg, classes, os.path.join(gt_pred_show_root, 'target'), scale=0.6)
+        show_gt_pred(prop_test_fg, classes, os.path.join(gt_pred_show_root, 'test'), scale=0.7) 
+        # show_gt_pred(prop_test_bg, classes, os.path.join(gt_pred_show_root, 'test'), scale=0.7) 
+        show_gt_pred(prop_s_fg, classes, os.path.join(gt_pred_show_root, 'source')) 
+        show_gt_pred(prop_t_fg, classes, os.path.join(gt_pred_show_root, 'target'))
         
     del model # del只是删除变量的引用，不能直接释放内存，通过del将变量的引用次数降低为-1，依靠内存回收机制自动回收
 

@@ -1,7 +1,7 @@
 # ResNet101 Based Faster RCNN: Faster RCNN: VOC->Clipart
 # 44.8
 pretrained_models=../logs/source_only/faster_rcnn_R_101_C4/voc2clipart/model_final.pth
-CUDA_VISIBLE_DEVICES=0 python d_adapt.py --num-gpus 1 \
+CUDA_VISIBLE_DEVICES=3 python d_adapt.py --num-gpus 1 \
   --config-file config/faster_rcnn_R_101_C4_voc.yaml \
   -s VOC2007 ../datasets/VOC2007 VOC2012 ../datasets/VOC2012  \
   -t Clipart ../datasets/clipart --test Clipart ../datasets/clipart \

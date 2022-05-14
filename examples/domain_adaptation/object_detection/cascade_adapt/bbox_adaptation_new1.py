@@ -497,7 +497,7 @@ class BoundingBoxAdaptor:
             if data_loader_validation is not None:
                 iou = self.validate(data_loader_validation, model, box_transform, args)
                 if iou > best_iou:
-                    torch.save(model.state_dict(), self.logger.get_checkpoint_path('best_target'))
+                    torch.save(model.state_dict(), self.logger.get_checkpoint_path('best'))
                     print('best iou at epoch {} update to {}'.format(epoch, best_iou))
                     best_iou = iou
                     best_epoch_target = epoch

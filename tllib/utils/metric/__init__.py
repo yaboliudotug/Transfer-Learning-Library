@@ -73,8 +73,9 @@ class ConfusionMatrix(object):
         h = self.mat.float()
         acc_global = torch.diag(h).sum() / h.sum()
         acc = torch.diag(h) / h.sum(1)
+        recall = torch.diag(h) / h.sum(0)
         iu = torch.diag(h) / (h.sum(1) + h.sum(0) - torch.diag(h))
-        return acc_global, acc, iu
+        return acc_global, acc, recall, iu
 
     # def reduce_from_all_processes(self):
     #     if not torch.distributed.is_available():
@@ -96,9 +97,16 @@ class ConfusionMatrix(object):
                 ['{:.1f}'.format(i) for i in (iu * 100).tolist()],
                 iu.mean().item() * 100)
 
+    def compute_mat_percent(self):
+        if self.mat_percent is None:
+            n = self.num_classes + 1
+            self.mat_percent = torch.zeros((n, n), dtype=torch.int64, device=self.mat.device)
+            self.mat_percent[:-1, :-1] = self.mat.copy()
+            
+
     def format(self, classes: list):
         """Get the accuracy and IoU for each class in the table format"""
-        acc_global, acc, iu = self.compute()
+        acc_global, acc, recall, iu = self.compute()
 
         table = prettytable.PrettyTable(["class", "acc", "iou"])
         for i, class_name, per_acc, per_iu in zip(range(len(classes)), classes, (acc * 100).tolist(), (iu * 100).tolist()):
