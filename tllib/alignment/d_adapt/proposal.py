@@ -142,7 +142,7 @@ class ProposalGenerator(DatasetEvaluator):
             if gt_boxes.tensor.shape[0] == 0:
                 proposal.all_gt_classes = proposal.all_gt_boxes = np.array([])
             else:
-                proposal.all_gt_classes = input_instance.gt_classes.tensor.numpy()
+                proposal.all_gt_classes = input_instance.gt_classes.numpy()
                 proposal.all_gt_boxes = input_instance.gt_boxes.tensor.numpy()
 
         return proposal
@@ -219,8 +219,10 @@ class Proposal:
             gt_boxes=self.gt_boxes[item],
             gt_ious=self.gt_ious[item],
             gt_fg_classes=self.gt_fg_classes[item],
-            all_gt_boxes=self.all_gt_boxes[item],
-            all_gt_classes=self.all_gt_classes[item]
+            all_gt_boxes=self.all_gt_boxes,
+            all_gt_classes=self.all_gt_classes,
+            # all_gt_boxes=self.all_gt_boxes[item],
+            # all_gt_classes=self.all_gt_classes[item]
         )
 
 
@@ -233,6 +235,10 @@ class ProposalEncoder(json.JSONEncoder):
 
 def asProposal(dict):
     if '__proposal__' in dict:
+        # print('********')
+        # print(dict["image_id"])
+        # print(dict.keys())
+        
         return Proposal(
             dict["image_id"],
             dict["filename"],
@@ -242,7 +248,9 @@ def asProposal(dict):
             np.array(dict["gt_classes"]),
             np.array(dict["gt_boxes"]),
             np.array(dict["gt_ious"]),
-            np.array(dict["gt_fg_classes"])
+            np.array(dict["gt_fg_classes"]),
+            np.array(dict["all_gt_classes"]),
+            np.array(dict["all_gt_boxes"]),
         )
     return dict
 
@@ -364,15 +372,18 @@ class ProposalDatasetTest(datasets.VisionDataset):
         crop_func: (ExpandCrop, optional):
     """
     def __init__(self, proposal_list: List[Proposal], transform: Optional[Callable] = None, crop_func=None):
-        super(ProposalDataset, self).__init__("", transform=transform)
+        super(ProposalDatasetTest, self).__init__("", transform=transform)
         proposal_list_ls = list(filter(lambda p: len(p) > 0, proposal_list))  # remove images without proposals
+        print('########## ProposalDatasetTest #########')
+        print(len(proposal_list_ls))
         self.loader = default_loader
         self.crop_func = crop_func
         proposal_list = []
         for proposals in proposal_list_ls:
             for i in range(len(proposals)):
-                self.proposal_list.append(proposals[i])
+                proposal_list.append(proposals[i])
         self.proposal_list = proposal_list
+        print(len(self.proposal_list))
 
     def __getitem__(self, index: int):
         # get proposals for the index-th image

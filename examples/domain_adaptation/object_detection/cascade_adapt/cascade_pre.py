@@ -6,11 +6,13 @@
 import logging
 import os
 import argparse
+import shutil
 import sys
 import pprint
 from time import sleep
 import numpy as np
 import cv2
+import tqdm
 
 import torch
 from torch.nn.parallel import DistributedDataParallel
@@ -55,40 +57,41 @@ def generate_proposals(model, num_classes, dataset_names, cache_root, cfg):
         bg_proposals_list.flush()
     return fg_proposals_list, bg_proposals_list
 
-def show_gt_pred(proposal_list, gt_list, class_names, save_dir, label, scale=0.5):
+
+def show_gt_pred(proposal_list, class_names, save_dir, scale=0.5):
     if os.path.exists(save_dir):
         return
-    os.makedirs(save_dir)
+    # if os.path.exists(save_dir):
+    #     shutil.rmtree(save_dir)
+    # os.makedirs(save_dir, exist_ok=True)
     palette = {'red': (0, 0, 255), 'green': (0, 255, 0), 'blue': (255, 0, 0)}
+    class_names = class_names + ['bg']
     img_height, img_width = 0, 0
-    for proposals, gt in zip(proposal_list, gt_list):
-        gt_classes, gt_bboxes = gt
+    for proposals in tqdm.tqdm(proposal_list):
         file_path = proposals.filename
-        print(file_path)
+        gt_classes, gt_bboxes = proposals.all_gt_classes, proposals.all_gt_boxes
         img_np = cv2.imread(file_path)
         img_height = img_np.shape[0]
         img_width = img_np.shape[1]
         for idx in range(len(gt_classes)):
             class_id, bbox = gt_classes[idx], gt_bboxes[idx]
+            bbox = [int(i) for i in bbox]
             class_name = class_names[class_id]
             cv2.rectangle(img_np, (bbox[0], bbox[1]), (bbox[2], bbox[3]), palette['blue'], 2) 
             cv2.putText(img_np, '{}'.format(class_name), (bbox[2] + 2, bbox[1] + 2), cv2.FONT_HERSHEY_COMPLEX,
                             0.7, palette['blue'], 1)
         for idx in range(len(proposals.pred_classes)):
             pred_box=proposals.pred_boxes[idx]
-            pred_class=proposals.pred_boxes[idx]
+            pred_class=proposals.pred_classes[idx]
             pred_score=proposals.pred_scores[idx]
             pred_class_name = class_names[pred_class]
+            pred_box = [int(i) for i in pred_box]
             cv2.rectangle(img_np, (pred_box[0], pred_box[1]), (pred_box[2], pred_box[3]), palette['red'], 2) 
             cv2.putText(img_np, '{}_{:.2f}'.format(pred_class_name, pred_score), (pred_box[2] + 2, pred_box[1] + 2), cv2.FONT_HERSHEY_COMPLEX,
                             0.7, palette['red'], 1)
     
-    img_np = cv2.resize(img_np, (int(img_height * scale), int(img_width * scale)))
-    cv2.imwrite(os.path.join(save_dir, os.path.basename(file_path)), img_np)
-
-
-
-
+        img_np = cv2.resize(img_np, (int(img_width * scale), int(img_height * scale)))
+        cv2.imwrite(os.path.join(save_dir, os.path.basename(file_path)), img_np)
 
 def generate_category_labels(prop, category_adaptor, cache_filename):
     """Generate category labels for each proposals in `prop` and save them to the disk"""
@@ -183,15 +186,17 @@ def train(model, logger, cfg, args, args_cls, args_box):
     model = model.to(torch.device('cpu'))
     if args.show_gt == 'show_gt':
         gt_pred_show_root = os.path.join(cfg.OUTPUT_DIR, "cache", "show_gt_pred")
-        show_gt_pred(prop_t_fg, os.path.join(gt_pred_show_root, 'target'), label=False)
-        show_gt_pred(prop_s_fg, os.path.join(gt_pred_show_root, 'source'), label=True) 
+        show_gt_pred(prop_test_fg, classes, os.path.join(gt_pred_show_root, 'test'), scale=0.6) 
+        show_gt_pred(prop_s_fg, classes, os.path.join(gt_pred_show_root, 'source'), scale=0.6) 
+        show_gt_pred(prop_t_fg, classes, os.path.join(gt_pred_show_root, 'target'), scale=0.6)
+        
     del model # del只是删除变量的引用，不能直接释放内存，通过del将变量的引用次数降低为-1，依靠内存回收机制自动回收
 
     # train the category adaptor
     for cascade_id in range(1, args.num_cascade + 1):
         category_adaptor = category_adaptation_new1.CategoryAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "cls_{}".format(cascade_id)), args_cls)
-        if not category_adaptor.load_checkpoint():
-        # if True:
+        # if not category_adaptor.load_checkpoint():
+        if True:
             data_loader_source = category_adaptor.prepare_training_data(prop_s_fg + prop_s_bg, True)
             data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False)
             data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg)
@@ -218,8 +223,8 @@ def train(model, logger, cfg, args, args_cls, args_box):
     # for bbox_adaptor_id in range(1, args.num_category_cascade + 1):
         # train the bbox adaptor
         bbox_adaptor = bbox_adaptation_new1.BoundingBoxAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "bbox_{}".format(cascade_id)), args_box)
-        if not bbox_adaptor.load_checkpoint():
-        # if True:
+        # if not bbox_adaptor.load_checkpoint():
+        if True:
             data_loader_source = bbox_adaptor.prepare_training_data(prop_s_fg, True)
             data_loader_target = bbox_adaptor.prepare_training_data(prop_t_fg, False)
             data_loader_validation = bbox_adaptor.prepare_validation_data(prop_t_fg)
