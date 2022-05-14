@@ -384,6 +384,17 @@ class CategoryAdaptor:
         # switch to evaluate mode
         model.eval()
         confmat = ConfusionMatrix(len(class_names)+1)
+        pred_class_dict = {}
+        gt_dict = {}
+        pred_score_dict = {}
+        for class_name in class_names + ['bg']:
+            pred_score_dict[class_name] = []
+            pred_class_dict[class_name] = []
+            gt_dict[class_name] = []
+
+        pred_class_ls = []
+        gt_ls = []
+        pred_score_ls = []
 
         with torch.no_grad():
             end = time.time()
@@ -400,6 +411,10 @@ class CategoryAdaptor:
                 confmat.update(gt_classes, output.argmax(1))
                 losses.update(loss.item(), images.size(0))
                 top1.update(acc1.item(), images.size(0))
+
+                gt_ls.extend(gt_classes.tensor.numpy())
+                pred_class_ls.extend(output.argmax(1).tensor.numpy())
+                pred_score_ls.extend(output.max(1).tensor.numpy())
 
                 # measure elapsed time
                 batch_time.update(time.time() - end)

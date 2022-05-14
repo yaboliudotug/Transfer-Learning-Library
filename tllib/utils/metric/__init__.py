@@ -1,5 +1,6 @@
 import torch
 import prettytable
+import numpy as np
 
 __all__ = ['keypoint_detection']
 
@@ -39,6 +40,23 @@ def accuracy(output, target, topk=(1,)):
             res.append(correct_k * (100.0 / batch_size))
         return res
 
+def compute_confusionmatrix(gt_ls, pred_class_ls, pred_score_ls, class_names, score_thresholds=[0]):
+    res = []
+    for score_threshold in score_thresholds:
+        pred_class_ls[pred_score_ls < score_threshold] = len(class_names)
+        mat = np.zeors(len(class_names), len(class_names))
+        for i, j in zip(pred_class_ls, gt_ls):
+            mat[i, j] = mat[i, j] + 1
+        acc = np.diag(mat) / mat.sum(1)
+        recall = np.diag(mat) / mat.sum(0)
+        res.append(
+            {
+                'confusion_matrix': mat,
+                'acc': acc,
+                'recall': recall
+            }
+        )
+    return res
 
 class ConfusionMatrix(object):
     def __init__(self, num_classes):
