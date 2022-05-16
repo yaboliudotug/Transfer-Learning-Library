@@ -196,15 +196,22 @@ def train(model, logger, cfg, args, args_cls, args_box):
 
     # train the category adaptor
     for cascade_id in range(1, args.num_cascade + 1):
+        print('****** Cascade phase {} ******\n'.format(cascade_id))
         category_adaptor = category_adaptation_new1.CategoryAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "cls_{}".format(cascade_id)), args_cls)
         # if not category_adaptor.load_checkpoint():
         if True:
+            # print('prepare data_loader: source ......')
             data_loader_source = category_adaptor.prepare_training_data(prop_s_fg + prop_s_bg, True)
+            # print('prepare data_loader: target ......')
             data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False)
+            # print('prepare data_loader: validation ......')
             data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg)
+            # print('prepare data_loader: test ......')
             data_loader_test = category_adaptor.prepare_validation_data(prop_test_fg + prop_test_bg)
             # 使用source domain的proposal进行训练，而不仅仅是gt，因为gt数量过少，且不具有roi的特征代表性
-            category_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, data_loader_test, distributed)
+            category_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, distributed=distributed)
+            # category_adaptor.fit(data_loader_source, data_loader_target, data_loader_test)
+
 
         # generate category labels for each proposals
         cache_feedback_root = os.path.join(cfg.OUTPUT_DIR, "cache", "feedback")

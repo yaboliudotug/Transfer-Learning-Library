@@ -41,22 +41,25 @@ def accuracy(output, target, topk=(1,)):
         return res
 
 def compute_confusionmatrix(gt_ls, pred_class_ls, pred_score_ls, class_names, score_thresholds=[0]):
-    res = []
+    res = {}
     for score_threshold in score_thresholds:
-        pred_class_ls[pred_score_ls < score_threshold] = len(class_names)
-        mat = np.zeors(len(class_names), len(class_names))
+        # pred_class_ls[pred_score_ls < score_threshold] = len(class_names)
+        pred_class_ls = [pred_class_ls[idx] if pred_score_ls[idx] >= score_threshold \
+        else len(class_names) - 1 for idx in range(len(pred_class_ls))]
+        mat = np.zeros((len(class_names), len(class_names)))
         for i, j in zip(pred_class_ls, gt_ls):
             mat[i, j] = mat[i, j] + 1
         acc = np.diag(mat) / mat.sum(1)
         recall = np.diag(mat) / mat.sum(0)
-        res.append(
-            {
+        for i in range(len(recall)):
+            if np.isnan(recall[i]):
+                print(np.diag(mat)[i], mat.sum(0)[i])
+        res[str(score_threshold)] = {
                 'score_thresholds': score_threshold,
                 'confusion_matrix': mat,
                 'acc': acc,
                 'recall': recall
             }
-        )
     return res
 
 class ConfusionMatrix(object):

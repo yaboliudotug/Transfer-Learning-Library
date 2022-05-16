@@ -27,7 +27,7 @@ from tllib.utils.meter import AverageMeter, ProgressMeter
 from tllib.utils.logger import CompleteLogger
 from tllib.modules.regressor import Regressor
 from tllib.alignment.mdd import ImageRegressor, RegressionMarginDisparityDiscrepancy
-from tllib.alignment.d_adapt.proposal import ProposalDataset, PersistentProposalList, ProposalDatasetTest, flatten, ExpandCrop
+from tllib.alignment.d_adapt.proposal import ProposalDataset, PersistentProposalList, flatten, ExpandCrop
 
 import utils
 

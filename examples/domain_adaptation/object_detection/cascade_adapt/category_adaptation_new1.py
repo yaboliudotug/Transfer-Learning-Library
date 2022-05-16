@@ -3,6 +3,7 @@ Training a category adaptor
 @author: Junguang Jiang
 @contact: JiangJunguang1123@outlook.com
 """
+from gettext import npgettext
 import random
 import time
 import warnings
@@ -12,6 +13,8 @@ import os.path as osp
 from collections import deque
 import tqdm
 from typing import List
+
+import prettytable
 
 import torch
 from torch import Tensor
@@ -29,7 +32,7 @@ import detectron2.utils.comm as comm
 sys.path.append('../../../..')
 from tllib.modules.domain_discriminator import DomainDiscriminator
 from tllib.alignment.cdan import ConditionalDomainAdversarialLoss, ImageClassifier
-from tllib.alignment.d_adapt.proposal import ProposalDataset, ProposalDatasetTest, flatten, Proposal
+from tllib.alignment.d_adapt.proposal import ProposalDataset, flatten, Proposal
 from tllib.utils.data import ForeverDataIterator
 from tllib.utils.metric import accuracy, ConfusionMatrix, compute_confusionmatrix
 from tllib.utils.meter import AverageMeter, ProgressMeter
@@ -158,6 +161,9 @@ class CategoryAdaptor:
         dataset = ProposalDataset(filtered_proposals_list, transform)
         dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
                                 shuffle=True, num_workers=self.args.workers, drop_last=True)
+        print('>>>>> one dataset, dataset_length:{}, batch_size:{}, dataloader_length:{}'.format(
+            len(dataset), self.args.batch_size, len(dataloader)
+        ))
         return dataloader
 
     def prepare_validation_data(self, proposal_list: List[Proposal]):
@@ -176,10 +182,12 @@ class CategoryAdaptor:
             filtered_proposals_list.append(proposals[keep_indices])
 
         filtered_proposals_list = flatten(filtered_proposals_list, self.args.max_val)
-        # dataset = ProposalDataset(filtered_proposals_list, transform)
-        dataset = ProposalDatasetTest(filtered_proposals_list, transform)   # !!!!!
+        dataset = ProposalDataset(filtered_proposals_list, transform)
+        # dataset = ProposalDatasetTest(filtered_proposals_list, transform)   # !!!!!
         dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
                                 shuffle=False, num_workers=self.args.workers, drop_last=False)
+        print('>>>>> one dataset, dataset_length:{}, batch_size:{}, dataloader_length:{}'.format(
+            len(dataset), self.args.batch_size, len(dataloader)))
         return dataloader
 
     def prepare_test_data(self, proposal_list: List[Proposal]):
@@ -248,10 +256,19 @@ class CategoryAdaptor:
         best_epoch = 0
         num_iters_source = len(iter_source)
         num_iters_target = len(iter_target)
-        # print('>>>>>>>>')
-        if args.iters_perepoch_mode == 'compute_from_epoch':
-            args.iters_per_epoch = int(max(num_iters_source, num_iters_target) / args.batch_size)
-            args.iters_per_epoch = args.iters_per_epoch * args.coefficient
+        print('category fitting ......')
+        print('num_iters_source: {}'.format(num_iters_source))
+        print('num_iters_target: {}'.format(num_iters_target))
+        if data_loader_validation is not None:
+            print('num_iters_validation: {}'.format(len(data_loader_validation)))
+        if data_loader_test is not None:
+            print('num_iters_test: {}'.format(len(data_loader_test)))
+
+        if args.debug:
+            print('debug ......')
+            args.iters_per_epoch = 21
+        elif args.iters_perepoch_mode == 'compute_from_epoch':
+            args.iters_per_epoch = int(max(num_iters_source, num_iters_target) * args.coefficient)
         print('num iters per epoch:', args.iters_per_epoch)
 
         for epoch in range(args.epochs):
@@ -412,9 +429,9 @@ class CategoryAdaptor:
                 losses.update(loss.item(), images.size(0))
                 top1.update(acc1.item(), images.size(0))
 
-                gt_ls.extend(gt_classes.tensor.numpy())
-                pred_class_ls.extend(output.argmax(1).tensor.numpy())
-                pred_score_ls.extend(output.max(1).tensor.numpy())
+                gt_ls.extend(gt_classes.to(torch.device("cpu")).numpy())
+                pred_class_ls.extend(output.cpu().argmax(1).numpy())
+                pred_score_ls.extend(output.cpu().max(1)[0].numpy())
 
                 # measure elapsed time
                 batch_time.update(time.time() - end)
@@ -425,9 +442,19 @@ class CategoryAdaptor:
 
             print(' * Acc@1 {top1.avg:.3f}'.format(top1=top1))
             print(confmat.format(class_names+["bg"]))
+
+            score_thresholds=[0, 0.6, 0.9, 0.95, 0.97, 0.98, 0.99]
             confusion_res = compute_confusionmatrix(gt_ls, pred_class_ls, pred_score_ls, \
-                class_names+['bg'], score_thresholds=[0, 0.5, 0.8, 0.9, 0.95, 0.97, 0.98, 0.99])
-            print(confusion_res)
+                class_names+['bg'], score_thresholds=score_thresholds)
+            for score_threshold in score_thresholds:
+                one_confusion_res = confusion_res[str(score_threshold)]
+                acc = one_confusion_res['acc']
+                recall = one_confusion_res['recall']
+                print("PR result at score_threshold {}".format(score_threshold))
+                table = prettytable.PrettyTable(["class", "acc", "recall"])
+                for i, per_class, per_acc, per_recall in zip(range(len(class_names+['bg'])), class_names+['bg'], (acc * 100).tolist(), (recall * 100).tolist()):
+                    table.add_row([per_class, per_acc, per_recall])
+                print(table.get_string())
 
         return top1.avg
 
@@ -453,6 +480,8 @@ class CategoryAdaptor:
         #                     help='backbone architecture: ' +
         #                          ' | '.join(utils.get_model_names()) +
         #                          ' (default: resnet101)')
+        parser.add_argument('--debug', action='store_true',
+                            help='debug.')
 
         parser.add_argument('--bottleneck-dim-c', default=1024, type=int,
                             help='Dimension of bottleneck')
@@ -490,7 +519,7 @@ class CategoryAdaptor:
                             help='Number of iterations per epoch')
         parser.add_argument('--iters-perepoch-mode', default='compute_from_epoch', type=str,
                             help='iters-perepoch-mode')    
-        parser.add_argument('--coefficient', default=10, type=int,
+        parser.add_argument('--coefficient', default=1, type=int,
                             help='iters-perepoch-mode coefficient')                   
         parser.add_argument('--print-freq-c', default=10, type=int,
                             metavar='N', help='print frequency (default: 100)')
