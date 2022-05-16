@@ -1,12 +1,12 @@
 # ResNet101 Based Faster RCNN: Faster RCNN: VOC->Clipart
 # 44.8
-pretrained_models=../logs/source_only/faster_rcnn_R_101_C4/voc2clipart/model_final.pth
-CUDA_VISIBLE_DEVICES=3 python d_adapt.py --num-gpus 1 \
-  --config-file config/faster_rcnn_R_101_C4_voc.yaml \
-  -s VOC2007 ../datasets/VOC2007 VOC2012 ../datasets/VOC2012  \
-  -t Clipart ../datasets/clipart --test Clipart ../datasets/clipart \
-  --finetune --bbox-refine \
-  OUTPUT_DIR logs/faster_rcnn_R_101_C4/voc2clipart/phase1 MODEL.WEIGHTS ${pretrained_models} SEED 0
+# pretrained_models=../logs/source_only/faster_rcnn_R_101_C4/voc2clipart/model_final.pth
+# CUDA_VISIBLE_DEVICES=3 python d_adapt.py --num-gpus 1 \
+#   --config-file config/faster_rcnn_R_101_C4_voc.yaml \
+#   -s VOC2007 ../datasets/VOC2007 VOC2012 ../datasets/VOC2012  \
+#   -t Clipart ../datasets/clipart --test Clipart ../datasets/clipart \
+#   --finetune --bbox-refine \
+#   OUTPUT_DIR logs/faster_rcnn_R_101_C4/voc2clipart/phase1 MODEL.WEIGHTS ${pretrained_models} SEED 0
 
 # 47.9
 # pretrained_models=logs/faster_rcnn_R_101_C4/voc2clipart/phase1/model_final.pth
@@ -62,12 +62,12 @@ CUDA_VISIBLE_DEVICES=3 python d_adapt.py --num-gpus 1 \
 
 # # ResNet101 Based Faster RCNN: Cityscapes -> Foggy Cityscapes
 # # 40.1
-# pretrained_models=../logs/source_only/faster_rcnn_R_101_C4/cityscapes2foggy/model_final.pth
-# CUDA_VISIBLE_DEVICES=0,1,2,3 python d_adapt.py --num-gpus 4 --workers-c 4 --max-train-c 20 --ignored-scores-c 0.05 0.5 \
-#   --config-file config/faster_rcnn_R_101_C4_cityscapes.yaml \
-#   -s Cityscapes ../datasets/cityscapes_in_voc -t FoggyCityscapes ../datasets/foggy_cityscapes_in_voc/  \
-#   --test FoggyCityscapesTest ../datasets/foggy_cityscapes_in_voc/ --finetune --trade-off 0.5 --bbox-refine \
-#   OUTPUT_DIR logs/faster_rcnn_R_101_C4/cityscapes2foggy/phase1 MODEL.WEIGHTS ${pretrained_models} SEED 0
+pretrained_models=../logs/source_only/faster_rcnn_R_101_C4/cityscapes2foggy/model_final.pth
+CUDA_VISIBLE_DEVICES=3 python d_adapt.py --num-gpus 1 --workers-c 4 --max-train-c 20 --ignored-scores-c 0.05 0.5 \
+  --config-file config/faster_rcnn_R_101_C4_cityscapes.yaml \
+  -s Cityscapes ../datasets/cityscapes_in_voc -t FoggyCityscapes ../datasets/foggy_cityscapes_in_voc/  \
+  --test FoggyCityscapesTest ../datasets/foggy_cityscapes_in_voc/ --finetune --trade-off 0.5 --bbox-refine \
+  OUTPUT_DIR logs/faster_rcnn_R_101_C4/cityscapes2foggy/phase1 MODEL.WEIGHTS ${pretrained_models} SEED 0
 
 # # 42.4
 # pretrained_models=logs/faster_rcnn_R_101_C4/cityscapes2foggy/phase1/model_final.pth

@@ -376,16 +376,26 @@ class CategoryAdaptor:
         # switch to evaluate mode
         self.model.eval()
         predictions = deque()
+        # print(self.model.device)
 
         with torch.no_grad():
+            end_time = time.time()
             for images, _ in tqdm.tqdm(data_loader):
+                data_time = time.time()
+                # print('data time: {:.3f}'.format(data_time- end_time))
                 images = images.to(device)
-
+                device_time = time.time()
+                # print('device_time: {:.3f}'.format(device_time- data_time))
                 # compute output
                 output = self.model(images)
+                model_time = time.time()
+                # print('model_time: {:.3f}'.format(model_time - device_time))
                 prediction = output.argmax(-1).cpu().numpy().tolist()
                 for p in prediction:
                     predictions.append(p)
+                post_time = time.time()
+                # print('post_time: {:.3f}'.format(post_time - model_time))
+                end_time = time.time()
         return predictions
 
     @staticmethod
@@ -446,15 +456,20 @@ class CategoryAdaptor:
             score_thresholds=[0, 0.6, 0.9, 0.95, 0.97, 0.98, 0.99]
             confusion_res = compute_confusionmatrix(gt_ls, pred_class_ls, pred_score_ls, \
                 class_names+['bg'], score_thresholds=score_thresholds)
+            table = prettytable.PrettyTable()
+            table.add_column('class', class_names + ['bg'])
             for score_threshold in score_thresholds:
                 one_confusion_res = confusion_res[str(score_threshold)]
                 acc = one_confusion_res['acc']
                 recall = one_confusion_res['recall']
-                print("PR result at score_threshold {}".format(score_threshold))
-                table = prettytable.PrettyTable(["class", "acc", "recall"])
+                # print("PR result at score_threshold {}".format(score_threshold))
+                # table = prettytable.PrettyTable(["class", "acc", "recall"])
+                write_column_name = 's_{} P/R'.format(score_threshold)
+                write_column = []
                 for i, per_class, per_acc, per_recall in zip(range(len(class_names+['bg'])), class_names+['bg'], (acc * 100).tolist(), (recall * 100).tolist()):
-                    table.add_row([per_class, per_acc, per_recall])
-                print(table.get_string())
+                    write_column += ['{:.1f}  {:.1f}'.format(per_acc, per_recall)]
+                table.add_column(write_column_name, write_column)
+            print(table.get_string())
 
         return top1.avg
 
@@ -499,9 +514,9 @@ class CategoryAdaptor:
         parser.add_argument('--epsilon-c', default=0.01, type=float,
                             help='epsilon hyper-parameter in Robust Cross Entropy')
         # training parameters
-        parser.add_argument('--batch-size-c', default=96, type=int,
+        parser.add_argument('--batch-size-c', default=8, type=int,
                             metavar='N',
-                            help='mini-batch size (default: 64)')   
+                            help='mini-batch size (default: 64)')   #96
                             # 64，实际预测时，会把source和target cat到一起，batch_size会变成2倍
         parser.add_argument('--learning-rate-c', default=0.01, type=float,
                             metavar='LR', help='initial learning rate', dest='lr')
@@ -511,9 +526,9 @@ class CategoryAdaptor:
         parser.add_argument('--weight-decay-c', default=1e-3, type=float,
                             metavar='W', help='weight decay (default: 1e-3)',
                             dest='weight_decay')
-        parser.add_argument('--workers-c', default=2, type=int, metavar='N',
+        parser.add_argument('--workers-c', default=8, type=int, metavar='N',
                             help='number of data loading workers (default: 2)')
-        parser.add_argument('--epochs-c', default=10, type=int, metavar='N',
+        parser.add_argument('--epochs-c', default=1, type=int, metavar='N',
                             help='number of total epochs to run')   # 10
         parser.add_argument('--iters-per-epoch-c', default=1000, type=int,
                             help='Number of iterations per epoch')

@@ -559,15 +559,15 @@ class BoundingBoxAdaptor:
         parser.add_argument('--momentum', default=0.9, type=float, metavar='M', help='momentum')
         parser.add_argument('--workers-b', default=4, type=int, metavar='N',
                             help='number of data loading workers (default: 2)')
-        parser.add_argument('--epochs-b', default=10, type=int, metavar='N',
-                            help='number of total epochs to run')
+        parser.add_argument('--epochs-b', default=1, type=int, metavar='N',
+                            help='number of total epochs to run')   #10
         parser.add_argument('--pretrain-lr-b', default=0.001, type=float,
                             metavar='LR', help='initial learning rate')
         parser.add_argument('--pretrain-lr-gamma-b', default=0.0002, type=float, help='parameter for lr scheduler')
         parser.add_argument('--pretrain-lr-decay-b', default=0.75, type=float, help='parameter for lr scheduler')
         parser.add_argument('--pretrain-weight-decay-b', default=1e-3, type=float,
                             metavar='W', help='weight decay (default: 1e-3)')
-        parser.add_argument('--pretrain-epochs-b', default=10, type=int, metavar='N',
+        parser.add_argument('--pretrain-epochs-b', default=1, type=int, metavar='N',
                             help='number of total epochs to run')   # 10
         parser.add_argument('--iters-per-epoch-b', default=1000, type=int,
                             help='Number of iterations per epoch')

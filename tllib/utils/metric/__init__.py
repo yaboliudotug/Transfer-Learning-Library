@@ -51,9 +51,6 @@ def compute_confusionmatrix(gt_ls, pred_class_ls, pred_score_ls, class_names, sc
             mat[i, j] = mat[i, j] + 1
         acc = np.diag(mat) / mat.sum(1)
         recall = np.diag(mat) / mat.sum(0)
-        for i in range(len(recall)):
-            if np.isnan(recall[i]):
-                print(np.diag(mat)[i], mat.sum(0)[i])
         res[str(score_threshold)] = {
                 'score_thresholds': score_threshold,
                 'confusion_matrix': mat,

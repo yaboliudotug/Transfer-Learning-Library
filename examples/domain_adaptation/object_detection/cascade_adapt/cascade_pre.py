@@ -209,8 +209,8 @@ def train(model, logger, cfg, args, args_cls, args_box):
             # print('prepare data_loader: test ......')
             data_loader_test = category_adaptor.prepare_validation_data(prop_test_fg + prop_test_bg)
             # 使用source domain的proposal进行训练，而不仅仅是gt，因为gt数量过少，且不具有roi的特征代表性
-            category_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, distributed=distributed)
-            # category_adaptor.fit(data_loader_source, data_loader_target, data_loader_test)
+            # category_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, distributed=distributed)
+            category_adaptor.fit(data_loader_source, data_loader_target, data_loader_test)
 
 
         # generate category labels for each proposals

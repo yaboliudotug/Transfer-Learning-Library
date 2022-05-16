@@ -238,7 +238,7 @@ def asProposal(dict):
         # print('********')
         # print(dict["image_id"])
         # print(dict.keys())
-        
+        # print(dict.keys())
         return Proposal(
             dict["image_id"],
             dict["filename"],
