@@ -41,8 +41,13 @@ import utils
 import category_adaptation_new1
 import bbox_adaptation_new1
 
-distributed = comm.get_world_size() > 1
+# distributed = comm.get_world_size() > 1
+# print('#' * 20)
+# print(comm.get_world_size())
 
+def mprint(input):
+    if comm.is_main_process():
+        print(input)
 
 def generate_proposals(model, num_classes, dataset_names, cache_root, cfg):
     """Generate foreground proposals and background proposals from `model` and save them to the disk"""
@@ -103,11 +108,13 @@ def generate_category_labels(prop, category_adaptor, cache_filename):
         for p in prop:
             prop_w_category.append(p)
 
-        data_loader_test = category_adaptor.prepare_test_data(flatten(prop_w_category), distributed=distributed)
+        # data_loader_test = category_adaptor.prepare_test_data(flatten(prop_w_category), distributed=distributed)
+        data_loader_test = category_adaptor.prepare_test_data(flatten(prop_w_category))
         predictions = category_adaptor.predict(data_loader_test)
         for p in prop_w_category:
             p.pred_classes = np.array([predictions.popleft() for _ in range(len(p))])
-        prop_w_category.flush()
+        if comm.is_main_process():
+            prop_w_category.flush()
     return prop_w_category
 
 
@@ -129,8 +136,14 @@ def generate_bounding_box_labels(prop, bbox_adaptor, class_names, cache_filename
 
 
 def train(model, logger, cfg, args, args_cls, args_box):
-    
     distributed = comm.get_world_size() > 1
+    num_gpus = comm.get_world_size()
+    if comm.is_main_process():
+        print('#' * 50)
+        print('Distributed state: {}'.format(distributed))
+        print('Used GPU numbers: {}'.format(num_gpus))
+        print('#' * 50)
+
     if distributed:
         model = DistributedDataParallel(
             model, device_ids=[comm.get_local_rank()], broadcast_buffers=False
@@ -157,7 +170,6 @@ def train(model, logger, cfg, args, args_cls, args_box):
         params,
         lr=cfg.SOLVER.BASE_LR,
         momentum=cfg.SOLVER.MOMENTUM,
-
         nesterov=cfg.SOLVER.NESTEROV,
         weight_decay=cfg.SOLVER.WEIGHT_DECAY,
     )
@@ -186,34 +198,37 @@ def train(model, logger, cfg, args, args_cls, args_box):
     cache_proposal_root = os.path.join(cfg.OUTPUT_DIR, "cache", "proposal")
     prop_t_fg, prop_t_bg = generate_proposals(model, len(classes), args.targets, cache_proposal_root, cfg)
     prop_s_fg, prop_s_bg = generate_proposals(model, len(classes), args.sources, cache_proposal_root, cfg)
-    prop_test_fg, prop_test_bg = generate_proposals(model, len(classes), args.test, cache_proposal_root, cfg)
+    # prop_test_fg, prop_test_bg = generate_proposals(model, len(classes), args.test, cache_proposal_root, cfg)
     model = model.to(torch.device('cpu'))
-    if args.show_gt == 'show_gt':
-        gt_pred_show_root = os.path.join(cfg.OUTPUT_DIR, "cache", "show_gt_pred")
-        show_gt_pred(prop_test_fg, classes, os.path.join(gt_pred_show_root, 'test'), scale=0.7) 
-        # show_gt_pred(prop_test_bg, classes, os.path.join(gt_pred_show_root, 'test'), scale=0.7) 
-        show_gt_pred(prop_s_fg, classes, os.path.join(gt_pred_show_root, 'source')) 
-        show_gt_pred(prop_t_fg, classes, os.path.join(gt_pred_show_root, 'target'))
-        
-    del model # del只是删除变量的引用，不能直接释放内存，通过del将变量的引用次数降低为-1，依靠内存回收机制自动回收
 
-    # source_num = 156
-    # target_num = 100
-    # prop_s_fg, prop_s_bg = prop_s_fg[:source_num], prop_s_bg[:source_num]
-    # prop_t_fg, prop_t_bg = prop_t_fg[:target_num], prop_t_bg[:target_num]
+    # if args.debug:
+    #     source_num = 156
+    #     target_num = 100
+    #     prop_s_fg, prop_s_bg = prop_s_fg[:source_num], prop_s_bg[:source_num]
+    #     prop_t_fg, prop_t_bg = prop_t_fg[:target_num], prop_t_bg[:target_num]
+
+    if args.show_gt == 'show_gt' and comm.is_main_process():
+        gt_pred_show_root = os.path.join(cfg.OUTPUT_DIR, "cache", "show_gt_pred")
+        show_gt_pred(prop_s_fg, classes, os.path.join(gt_pred_show_root, 'source'), scale=0.6) 
+        show_gt_pred(prop_t_fg, classes, os.path.join(gt_pred_show_root, 'target'), scale=0.6)
+        # show_gt_pred(prop_test_fg, classes, os.path.join(gt_pred_show_root, 'test'), scale=0.6) 
 
     # train the category adaptor
     for cascade_id in range(1, args.num_cascade + 1):
-        print('****** Cascade phase {} ******\n'.format(cascade_id))
+        if comm.is_main_process():
+            print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
+            print('>>>>>>>>>>> Cascade Phase {} >>>>>>>>>>>'.format(cascade_id))
+            print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
         category_adaptor = category_adaptation_new1.CategoryAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "cls_{}".format(cascade_id)), args_cls)
         # if not category_adaptor.load_checkpoint():
         if True:
-            data_loader_source = category_adaptor.prepare_training_data(prop_s_fg + prop_s_bg, True, distributed=distributed)
-            data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False, distributed=distributed)
-            data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg, distributed=distributed)
-            data_loader_test = category_adaptor.prepare_validation_data(prop_test_fg + prop_test_bg, distributed=distributed)
+            data_loader_source = category_adaptor.prepare_training_data(prop_s_fg + prop_s_bg, True, domain_flag='source', distributed=distributed)
+            data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False, domain_flag='target', distributed=distributed)
+            data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg)
+            # data_loader_test = category_adaptor.prepare_validation_data(prop_test_fg + prop_test_bg)
             # 使用source domain的proposal进行训练，而不仅仅是gt，因为gt数量过少，且不具有roi的特征代表性
-            category_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, distributed=distributed)
+            # category_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, distributed=distributed, num_gpus=num_gpus)
+            category_adaptor.fit(data_loader_source, data_loader_target, distributed=distributed, num_gpus=num_gpus)
 
 
         # generate category labels for each proposals
@@ -237,12 +252,12 @@ def train(model, logger, cfg, args, args_cls, args_box):
         bbox_adaptor = bbox_adaptation_new1.BoundingBoxAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "bbox_{}".format(cascade_id)), args_box)
         # if not bbox_adaptor.load_checkpoint():
         if True:
-            data_loader_source = bbox_adaptor.prepare_training_data(prop_s_fg, True)
-            data_loader_target = bbox_adaptor.prepare_training_data(prop_t_fg, False)
+            data_loader_source = bbox_adaptor.prepare_training_data(prop_s_fg, True, distributed=distributed)
+            data_loader_target = bbox_adaptor.prepare_training_data(prop_t_fg, False, distributed=distributed)
             data_loader_validation = bbox_adaptor.prepare_validation_data(prop_t_fg)
-            data_loader_test = bbox_adaptor.prepare_validation_data(prop_test_fg)
+            # data_loader_test = bbox_adaptor.prepare_validation_data(prop_test_fg)
             bbox_adaptor.validate_baseline(data_loader_validation)
-            bbox_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, data_loader_test)
+            bbox_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation)
 
         # generate bounding box labels for each proposals
         cache_feedback_root = os.path.join(cfg.OUTPUT_DIR, "cache", "feedback_bbox")
@@ -342,6 +357,7 @@ def main(args, args_cls, args_box):
     # create model
     model = models.__dict__[cfg.MODEL.META_ARCHITECTURE](cfg, finetune=args.finetune)
     model.to(torch.device(cfg.MODEL.DEVICE))
+    print('Detection model move to device {} as rank {}'.format(torch.device(cfg.MODEL.DEVICE), comm.get_local_rank()))
     # logger.info("Model:\n{}".format(model))
 
     if args.eval_only:
@@ -359,11 +375,11 @@ def main(args, args_cls, args_box):
 
 if __name__ == "__main__":
     args_cls, argv = category_adaptation_new1.CategoryAdaptor.get_parser().parse_known_args()
-    print("Category Adaptation Args:")
+    # print("Category Adaptation Args:")
     # pprint.pprint(args_cls)
 
     args_box, argv = bbox_adaptation_new1.BoundingBoxAdaptor.get_parser().parse_known_args(args=argv)
-    print("Bounding Box Adaptation Args:")
+    # print("Bounding Box Adaptation Args:")
     # pprint.pprint(args_box)
 
     parser = argparse.ArgumentParser(add_help=True)
@@ -372,7 +388,7 @@ if __name__ == "__main__":
     parser.add_argument('--use-best-bbox', default='best_test', type=str, help='use-best')
     parser.add_argument('--show-gt', default='show_gt', type=str, help='show_gt')
 
-
+    parser.add_argument('--debug', action='store_true', help='debug')
 
 
     # dataset parameters
@@ -421,7 +437,7 @@ if __name__ == "__main__":
         nargs=argparse.REMAINDER,
     )
     args, argv = parser.parse_known_args(argv)
-    print("Detection Args:")
+    # print("Detection Args:")
     # pprint.pprint(args)
 
     launch(
@@ -432,12 +448,3 @@ if __name__ == "__main__":
         dist_url=args.dist_url,
         args=(args, args_cls, args_box),
     )
-
-    # launch(
-    #     main,
-    #     args.num_gpus,
-    #     num_machines=args.num_machines,
-    #     machine_rank=args.machine_rank,
-    #     dist_url=args.dist_url,
-    #     args=(args, args_cls, args_box),
-    # )

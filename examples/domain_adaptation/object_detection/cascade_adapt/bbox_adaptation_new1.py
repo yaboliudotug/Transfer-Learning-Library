@@ -12,6 +12,8 @@ import argparse
 from collections import deque
 import tqdm
 
+# from cascade_pre import mprint
+
 import torch
 import torch.nn as nn
 import torch.backends.cudnn as cudnn
@@ -20,6 +22,7 @@ from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
 import torchvision.transforms as T
 import torch.nn.functional as F
+from torch.utils.data.distributed import DistributedSampler
 from detectron2.modeling.box_regression import Box2BoxTransform
 
 from tllib.utils.data import ForeverDataIterator
@@ -165,7 +168,7 @@ class BoundingBoxAdaptor:
         else:
             return False
 
-    def prepare_training_data(self, proposal_list: PersistentProposalList, labeled=True):
+    def prepare_training_data(self, proposal_list: PersistentProposalList, labeled=True, distributed=False):
         if not labeled:
             # remove (predicted) background proposals
             filtered_proposals_list = []
@@ -191,6 +194,12 @@ class BoundingBoxAdaptor:
         ])
 
         dataset = ProposalDataset(filtered_proposals_list, transform, crop_func=ExpandCrop(self.args.expand))
+        if distributed:
+            print('distribute dataset ......')
+            self.train_sampler = DistributedSampler(dataset, drop_last=True)
+            dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
+                                sampler=self.train_sampler, num_workers=self.args.workers, drop_last=True)
+
         dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
                                 shuffle=True, num_workers=self.args.workers, drop_last=True)
         return dataloader

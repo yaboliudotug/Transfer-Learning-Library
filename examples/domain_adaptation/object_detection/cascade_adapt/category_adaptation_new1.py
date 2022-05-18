@@ -16,6 +16,8 @@ from typing import List
 
 import prettytable
 
+# from cascade_pre import mprint
+
 import torch
 from torch import Tensor
 import torch.nn as nn
@@ -27,6 +29,7 @@ import torchvision.transforms as T
 import torch.nn.functional as F
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data.distributed import DistributedSampler
+import torch.distributed as dist
 
 import detectron2.utils.comm as comm
 
@@ -43,7 +46,6 @@ from tllib.vision.transforms import ResizeImage
 import utils
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-distributed = comm.get_world_size() > 1
 
 class ConfidenceBasedDataSelector:
     """Select data point based on confidence"""
@@ -98,7 +100,7 @@ class RobustCrossEntropyLoss(nn.CrossEntropyLoss):
 
 
 class CategoryAdaptor:
-    def __init__(self, class_names, log, args):
+    def __init__(self, class_names, log, args, distributed=False, num_gpus=1):
         self.class_names = class_names
         for k, v in args._get_kwargs():
             setattr(args, k.rstrip("_c"), v)
@@ -108,12 +110,13 @@ class CategoryAdaptor:
         self.selector = ConfidenceBasedDataSelector(self.args.confidence_ratio, range(len(self.class_names) + 1))
 
         # create model
-        print("=> using model '{}'".format(args.arch))
         backbone = utils.get_model(args.arch, pretrain=not args.scratch)
         pool_layer = nn.Identity() if args.no_pool else None
         num_classes = len(self.class_names) + 1
         self.model = ImageClassifier(backbone, num_classes, bottleneck_dim=args.bottleneck_dim,
                                      pool_layer=pool_layer, finetune=not args.scratch).to(device)
+        self.distributed = distributed
+        self.num_gpus = num_gpus
 
     def load_checkpoint(self, name='latest'):
         if osp.exists(self.logger.get_checkpoint_path(name)):
@@ -123,7 +126,7 @@ class CategoryAdaptor:
         else:
             return False
 
-    def prepare_training_data(self, proposal_list: List[Proposal], labeled=True, distributed=False):
+    def prepare_training_data(self, proposal_list: List[Proposal], labeled=True, domain_flag='source', distributed=False):
         if not labeled:
             # remove proposals with confidence score between (ignored_scores[0], ignored_scores[1])
             filtered_proposals_list = []
@@ -161,8 +164,11 @@ class CategoryAdaptor:
 
         dataset = ProposalDataset(filtered_proposals_list, transform)
         if distributed:
-            print('distribute dataset ......')
-            self.train_sampler = DistributedSampler(dataset, drop_last=True)
+            # print('distribute dataset ......')
+            if domain_flag == 'source':
+                self.train_sampler_source = DistributedSampler(dataset, drop_last=True)
+            elif domain_flag == 'target':
+                self.train_sampler_target = DistributedSampler(dataset, drop_last=True)
             dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
                                 sampler=self.train_sampler, num_workers=self.args.workers, drop_last=True)
         else:
@@ -191,13 +197,13 @@ class CategoryAdaptor:
         filtered_proposals_list = flatten(filtered_proposals_list, self.args.max_val)
         dataset = ProposalDataset(filtered_proposals_list, transform)
         # dataset = ProposalDatasetTest(filtered_proposals_list, transform)   # !!!!!
-        if distributed:
-            sampler = DistributedSampler(dataset, drop_last=False)
-            dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
-                                sampler=sampler, num_workers=self.args.workers, drop_last=False)
-        else:
-            dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
-                                shuffle=False, num_workers=self.args.workers, drop_last=False)
+        # if distributed:
+        #     sampler = DistributedSampler(dataset, drop_last=False)
+        #     dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
+        #                         sampler=sampler, num_workers=self.args.workers, drop_last=False)
+        # else:
+        dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
+                            shuffle=False, num_workers=self.args.workers, drop_last=False)
         # print('>>>>> one dataset, dataset_length:{}, batch_size:{}, dataloader_length:{}'.format(
         #     len(dataset), self.args.batch_size, len(dataloader)))
         return dataloader
@@ -211,16 +217,16 @@ class CategoryAdaptor:
         ])
 
         dataset = ProposalDataset(proposal_list, transform)
-        if distributed:
-            sampler = DistributedSampler(dataset)
-            dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
-                                sampler=sampler, num_workers=self.args.workers)
-        else:
-            dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
-                                shuffle=False, num_workers=self.args.workers, drop_last=False)
+        # if distributed:
+        #     sampler = DistributedSampler(dataset)
+        #     dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
+        #                         sampler=sampler, num_workers=self.args.workers)
+        # else:
+        dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
+                            shuffle=False, num_workers=self.args.workers, drop_last=False)
         return dataloader
 
-    def fit(self, data_loader_source, data_loader_target, data_loader_validation=None, data_loader_test=None, distributed=False):
+    def fit(self, data_loader_source, data_loader_target, data_loader_validation=None, data_loader_test=None, distributed=False, num_gpus=1):
         """When no labels exists on target domain, please set data_loader_validation=None"""
         args = self.args
         if args.seed is not None:
@@ -238,7 +244,7 @@ class CategoryAdaptor:
         iter_source = ForeverDataIterator(data_loader_source)
         iter_target = ForeverDataIterator(data_loader_target)
 
-        model = self.model
+        model = self.model.to(device)
         feature_dim = model.features_dim
         num_classes = len(self.class_names) + 1
 
@@ -259,6 +265,8 @@ class CategoryAdaptor:
             randomized_dim=args.randomized_dim
         ).to(device)
 
+        print('Category model move to device {} at rank {}'.format(device, comm.get_local_rank()))
+
         if distributed:
             model = DistributedDataParallel(
                 model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True
@@ -273,27 +281,30 @@ class CategoryAdaptor:
         best_epoch = 0
         num_iters_source = len(iter_source)
         num_iters_target = len(iter_target)
-        print('category fitting ......')
-        print('num_iters_source: {}'.format(num_iters_source))
-        print('num_iters_target: {}'.format(num_iters_target))
-        if data_loader_validation is not None:
-            print('num_iters_validation: {}'.format(len(data_loader_validation)))
-        if data_loader_test is not None:
-            print('num_iters_test: {}'.format(len(data_loader_test)))
+        if comm.is_main_process():
+            print('################# Category Fitting ################')
+            print('Source dataset length: {}'.format(num_iters_source))
+            print('Target dataset lengtht: {}'.format(num_iters_target))
+        if data_loader_validation is not None and comm.is_main_process():
+            print('Validation dataset length: {}'.format(len(data_loader_validation)))
+        if data_loader_test is not None and comm.is_main_process():
+            print('Test dataset length: {}'.format(len(data_loader_test)))
 
-        num_gpus = comm.get_world_size()
-        print('num_gpus: {}'.format(num_gpus))
-        if args.debug:
-            args.iters_per_epoch = 21
-        elif args.iters_perepoch_mode == 'compute_from_epoch':
+
+        if args.iters_perepoch_mode == 'compute_from_epoch':
             args.iters_per_epoch = int(max(num_iters_source, num_iters_target) * args.coefficient)
         standard_iters_per_epoch_one_gpu = 1000 * 64 // data_loader_source.batch_size
         if args.iters_per_epoch > standard_iters_per_epoch_one_gpu // num_gpus:
             args.iters_per_epoch = standard_iters_per_epoch_one_gpu  // num_gpus
-        print('num iters per epoch:', args.iters_per_epoch)
+
+        if args.debug:
+            args.iters_per_epoch = 21
+
+        if comm.is_main_process():
+            print('Num iters per epoch: {}'.format(args.iters_per_epoch))
 
         for epoch in range(args.epochs):
-            print("lr:", lr_scheduler.get_last_lr()[0])
+            # print("lr:", lr_scheduler.get_last_lr()[0])
             # train for one epoch
             batch_time = AverageMeter('Time', ':3.1f')
             data_time = AverageMeter('Data', ':3.1f')
@@ -319,8 +330,12 @@ class CategoryAdaptor:
             #     x_t, label = data
             #     x_t = x_t.to(device)
             #     print('iter: {}. {} {}'.format(i, x_t.shape, x_t.device))
-
-            self.train_sampler.set_epoch(epoch)
+            
+            if distributed:
+                self.train_sampler_source.set_epoch(epoch)
+                self.train_sampler_target.set_epoch(epoch)
+                if comm.is_main_process():
+                    print('update distribute sampler seed to {}'.format(epoch))
 
             for i in range(args.iters_per_epoch):
                 x_s, labels_s = next(iter_source)
@@ -341,11 +356,6 @@ class CategoryAdaptor:
                 x_s = x_s.to(device)
                 x_t = x_t.to(device)
                 gt_classes_s = labels_s['gt_classes'].to(device)
-                # print('iter: {}. {} {}'.format(i, x_t.shape, x_t.device))
-                # print('iter: {}'.format(i))
-                # print(x_s.shape, x_t.shape)
-                # print(x_s.shape ==  x_t.shape)
-                # continue
 
                 # measure data loading time
                 one_data_time = time.time()
@@ -366,7 +376,7 @@ class CategoryAdaptor:
 
                 cls_loss = F.cross_entropy(y_s, gt_classes_s, ignore_index=-1)
                 cls_loss_t = RobustCrossEntropyLoss(ignore_index=-1, offset=args.epsilon)(y_t, pseudo_classes_t)
-                transfer_loss = domain_adv(y_s, f_s, y_t, f_t)
+                transfer_loss, domain_acc = domain_adv(y_s, f_s, y_t, f_t)
                 # domain_acc = domain_adv.domain_discriminator_accuracy
                 loss = cls_loss + transfer_loss * args.trade_off + cls_loss_t
 
@@ -374,7 +384,7 @@ class CategoryAdaptor:
 
                 losses.update(loss.item(), x_s.size(0))
                 cls_accs.update(cls_acc, x_s.size(0))
-                # domain_accs.update(domain_acc, x_s.size(0))
+                domain_accs.update(domain_acc, x_s.size(0))
                 trans_losses.update(transfer_loss.item(), x_s.size(0))
                 losses_t.update(cls_loss_t.item(), x_s.size(0))
 
@@ -396,23 +406,28 @@ class CategoryAdaptor:
                         current_time, args.print_freq, print_time, print_time / args.print_freq * args.iters_per_epoch / 60))
                     print_end = time.time()
 
+            if distributed:
+                dist.barrier()
             # evaluate on validation set
-            if data_loader_validation is not None:
-                acc1 = self.validate(data_loader_validation, model, self.class_names, args)
-                if acc1 > best_acc1_target:
-                    if comm.is_main_process():
+            if comm.is_main_process():
+                if data_loader_validation is not None:
+                    print('************ Category Validation validating ************')
+                    acc1 = self.validate(data_loader_validation, model, self.class_names, args)
+                    if acc1 > best_acc1_target:
+                    # if comm.is_main_process():
                         torch.save(model.state_dict(), self.logger.get_checkpoint_path('best_target'))
                         print('best acc at epoch {} update to {}'.format(epoch, acc1))
-                    best_epoch = epoch
-                    best_acc1_target = acc1
-            if data_loader_test is not None:
-                acc1 = self.validate(data_loader_test, model, self.class_names, args)
-                if acc1 > best_acc1_test:
-                    if comm.is_main_process():
+                        best_epoch = epoch
+                        best_acc1_target = acc1
+                if data_loader_test is not None:
+                    print('************ Category Test validating ************')
+                    acc1 = self.validate(data_loader_test, model, self.class_names, args)
+                    if acc1 > best_acc1_test:
+                    # if comm.is_main_process():
                         torch.save(model.state_dict(), self.logger.get_checkpoint_path('best_test'))
                         print('best acc at epoch {} update to {}'.format(epoch, acc1))
-                    best_epoch = epoch
-                    best_acc1_test = acc1
+                        best_epoch = epoch
+                        best_acc1_test = acc1
                 
 
             # save checkpoint
@@ -422,19 +437,21 @@ class CategoryAdaptor:
         if comm.is_main_process():
             print("best_acc1 = {:3.1f} ad epoch {}".format(best_acc1_target, best_epoch))
             print("best_acc1_test = {:3.1f} ad epoch {}".format(best_acc1_test, best_epoch))
+        model.to(torch.device("cpu"))
         domain_adv.to(torch.device("cpu"))
         self.logger.logger.flush()
 
     def predict(self, data_loader):
-        if distributed:
-            self.model = DistributedDataParallel(
-                self.model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True
-            )
+        # if distributed:
+        #     self.model = DistributedDataParallel(
+        #         self.model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True
+        #     )
         # switch to evaluate mode
         self.model.eval()
         predictions = deque()
         # print(self.model.device)
-
+        if comm.is_main_process():
+            print('************ Category Predicting ************')
         with torch.no_grad():
             end_time = time.time()
             for images, _ in tqdm.tqdm(data_loader):
@@ -586,7 +603,7 @@ class CategoryAdaptor:
                             dest='weight_decay')
         parser.add_argument('--workers-c', default=8, type=int, metavar='N',
                             help='number of data loading workers (default: 2)')
-        parser.add_argument('--epochs-c', default=6, type=int, metavar='N',
+        parser.add_argument('--epochs-c', default=2, type=int, metavar='N',
                             help='number of total epochs to run')   # 10
         parser.add_argument('--iters-per-epoch-c', default=1000, type=int,
                             help='Number of iterations per epoch')
