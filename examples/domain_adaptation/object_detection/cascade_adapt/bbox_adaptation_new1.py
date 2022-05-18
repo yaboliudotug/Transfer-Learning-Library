@@ -211,8 +211,8 @@ class BoundingBoxAdaptor:
             filtered_proposals_list.append(proposals[keep_indices])
 
         filtered_proposals_list = flatten(filtered_proposals_list, self.args.max_val)
-        # dataset = ProposalDataset(filtered_proposals_list, transform, crop_func=ExpandCrop(self.args.expand))
-        dataset = ProposalDatasetTest(filtered_proposals_list, transform, crop_func=ExpandCrop(self.args.expand))
+        dataset = ProposalDataset(filtered_proposals_list, transform, crop_func=ExpandCrop(self.args.expand))
+        # dataset = ProposalDatasetTest(filtered_proposals_list, transform, crop_func=ExpandCrop(self.args.expand))
         dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
                                 shuffle=False, num_workers=self.args.workers, drop_last=False)
         return dataloader
@@ -340,8 +340,7 @@ class BoundingBoxAdaptor:
 
         if args.iters_perepoch_mode == 'compute_from_epoch':
             num_iters_source = len(iter_source)
-            args.iters_per_epoch = int(num_iters_source / args.batch_size)
-            args.iters_per_epoch = args.iters_per_epoch * args.coefficient
+            args.iters_per_epoch = int(num_iters_source / args.batch_size * args.coefficient)
         
         print('num iters per epoch:', args.iters_per_epoch)
         for epoch in range(args.pretrain_epochs):
@@ -412,8 +411,7 @@ class BoundingBoxAdaptor:
         if args.iters_perepoch_mode == 'compute_from_epoch':
             num_iters_source = len(iter_source)
             num_iters_target = len(iter_target)
-            args.iters_per_epoch = int(max(num_iters_source, num_iters_target) / args.batch_size)
-            args.iters_per_epoch = args.iters_per_epoch * args.coefficient
+            args.iters_per_epoch = int(max(num_iters_source, num_iters_target)  * args.coefficient)
         print('num iters per epoch:', args.iters_per_epoch)
 
         for epoch in range(args.epochs):

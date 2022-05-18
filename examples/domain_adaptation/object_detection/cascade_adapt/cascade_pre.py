@@ -41,6 +41,8 @@ import utils
 import category_adaptation_new1
 import bbox_adaptation_new1
 
+distributed = comm.get_world_size() > 1
+
 
 def generate_proposals(model, num_classes, dataset_names, cache_root, cfg):
     """Generate foreground proposals and background proposals from `model` and save them to the disk"""
@@ -101,7 +103,7 @@ def generate_category_labels(prop, category_adaptor, cache_filename):
         for p in prop:
             prop_w_category.append(p)
 
-        data_loader_test = category_adaptor.prepare_test_data(flatten(prop_w_category))
+        data_loader_test = category_adaptor.prepare_test_data(flatten(prop_w_category), distributed=distributed)
         predictions = category_adaptor.predict(data_loader_test)
         for p in prop_w_category:
             p.pred_classes = np.array([predictions.popleft() for _ in range(len(p))])
@@ -155,6 +157,7 @@ def train(model, logger, cfg, args, args_cls, args_box):
         params,
         lr=cfg.SOLVER.BASE_LR,
         momentum=cfg.SOLVER.MOMENTUM,
+
         nesterov=cfg.SOLVER.NESTEROV,
         weight_decay=cfg.SOLVER.WEIGHT_DECAY,
     )
@@ -194,23 +197,23 @@ def train(model, logger, cfg, args, args_cls, args_box):
         
     del model # del只是删除变量的引用，不能直接释放内存，通过del将变量的引用次数降低为-1，依靠内存回收机制自动回收
 
+    # source_num = 156
+    # target_num = 100
+    # prop_s_fg, prop_s_bg = prop_s_fg[:source_num], prop_s_bg[:source_num]
+    # prop_t_fg, prop_t_bg = prop_t_fg[:target_num], prop_t_bg[:target_num]
+
     # train the category adaptor
     for cascade_id in range(1, args.num_cascade + 1):
         print('****** Cascade phase {} ******\n'.format(cascade_id))
         category_adaptor = category_adaptation_new1.CategoryAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "cls_{}".format(cascade_id)), args_cls)
         # if not category_adaptor.load_checkpoint():
         if True:
-            # print('prepare data_loader: source ......')
-            data_loader_source = category_adaptor.prepare_training_data(prop_s_fg + prop_s_bg, True)
-            # print('prepare data_loader: target ......')
-            data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False)
-            # print('prepare data_loader: validation ......')
-            data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg)
-            # print('prepare data_loader: test ......')
-            data_loader_test = category_adaptor.prepare_validation_data(prop_test_fg + prop_test_bg)
+            data_loader_source = category_adaptor.prepare_training_data(prop_s_fg + prop_s_bg, True, distributed=distributed)
+            data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False, distributed=distributed)
+            data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg, distributed=distributed)
+            data_loader_test = category_adaptor.prepare_validation_data(prop_test_fg + prop_test_bg, distributed=distributed)
             # 使用source domain的proposal进行训练，而不仅仅是gt，因为gt数量过少，且不具有roi的特征代表性
-            # category_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, distributed=distributed)
-            category_adaptor.fit(data_loader_source, data_loader_target, data_loader_test)
+            category_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, distributed=distributed)
 
 
         # generate category labels for each proposals
