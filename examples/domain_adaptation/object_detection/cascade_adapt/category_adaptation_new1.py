@@ -36,7 +36,7 @@ import detectron2.utils.comm as comm
 
 sys.path.append('../../../..')
 from tllib.modules.domain_discriminator import DomainDiscriminator
-from tllib.alignment.cdan import ConditionalDomainAdversarialLoss, ImageClassifier
+from tllib.alignment.cdan_cascade import ConditionalDomainAdversarialLoss, ImageClassifier
 from tllib.alignment.d_adapt.proposal import ProposalDataset, flatten, Proposal
 from tllib.utils.data import ForeverDataIterator
 from tllib.utils.metric import accuracy, ConfusionMatrix, compute_confusionmatrix

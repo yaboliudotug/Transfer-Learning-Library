@@ -301,6 +301,8 @@ class CategoryAdaptor:
                 end = time.time()
 
                 if i % args.print_freq == 0:
+                    current_time = time.strftime('%m-%d %H:%M:%S',time.localtime(time.time()))
+                    print(current_time)
                     progress.display(i)
 
             # evaluate on validation set
