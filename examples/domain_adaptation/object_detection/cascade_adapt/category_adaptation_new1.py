@@ -6,6 +6,7 @@ Training a category adaptor
 from gettext import npgettext
 import random
 import time
+from turtle import ondrag
 import warnings
 import sys
 import argparse
@@ -167,10 +168,12 @@ class CategoryAdaptor:
             # print('distribute dataset ......')
             if domain_flag == 'source':
                 self.train_sampler_source = DistributedSampler(dataset, drop_last=True)
+                dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
+                                sampler=self.train_sampler_source, num_workers=self.args.workers, drop_last=True)
             elif domain_flag == 'target':
                 self.train_sampler_target = DistributedSampler(dataset, drop_last=True)
-            dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
-                                sampler=self.train_sampler, num_workers=self.args.workers, drop_last=True)
+                dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
+                                sampler=self.train_sampler_target, num_workers=self.args.workers, drop_last=True)
         else:
             dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
                                 shuffle=True, num_workers=self.args.workers, drop_last=True)
@@ -217,12 +220,12 @@ class CategoryAdaptor:
         ])
 
         dataset = ProposalDataset(proposal_list, transform)
-        # if distributed:
-        #     sampler = DistributedSampler(dataset)
-        #     dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
-        #                         sampler=sampler, num_workers=self.args.workers)
-        # else:
-        dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
+        if distributed:
+            sampler = DistributedSampler(dataset)
+            dataloader = DataLoader(dataset, batch_size=self.args.inference_batch_size,
+                                sampler=sampler, num_workers=self.args.workers)
+        else:
+            dataloader = DataLoader(dataset, batch_size=self.args.inference_batch_size,
                             shuffle=False, num_workers=self.args.workers, drop_last=False)
         return dataloader
 
@@ -293,7 +296,7 @@ class CategoryAdaptor:
 
         if args.iters_perepoch_mode == 'compute_from_epoch':
             args.iters_per_epoch = int(max(num_iters_source, num_iters_target) * args.coefficient)
-        standard_iters_per_epoch_one_gpu = 1000 * 64 // data_loader_source.batch_size
+        standard_iters_per_epoch_one_gpu = args.iters_per_epoch_standard * 64 // data_loader_source.batch_size
         if args.iters_per_epoch > standard_iters_per_epoch_one_gpu // num_gpus:
             args.iters_per_epoch = standard_iters_per_epoch_one_gpu  // num_gpus
 
@@ -339,8 +342,12 @@ class CategoryAdaptor:
 
             for i in range(args.iters_per_epoch):
                 x_s, labels_s = next(iter_source)
-                x_t, labels_t = next(iter_target)
+                x_s = x_s.to(device)
+                y_s, f_s = model(x_s)
 
+                x_t, labels_t = next(iter_target)
+                x_t = x_t.to(device)
+                y_t, f_t = model(x_t)
                 # assign pseudo labels for target-domain proposals with extremely high confidence
                 # 根据提前计算的confidence-ratio计算出的可选择置信度阈值，来选取当前target batch中的可用样本
                 selected = torch.tensor(
@@ -353,8 +360,6 @@ class CategoryAdaptor:
                 pseudo_classes_t = selected * labels_t['pred_classes'] + (~selected) * -1
                 pseudo_classes_t = pseudo_classes_t.to(device)
 
-                x_s = x_s.to(device)
-                x_t = x_t.to(device)
                 gt_classes_s = labels_s['gt_classes'].to(device)
 
                 # measure data loading time
@@ -363,14 +368,14 @@ class CategoryAdaptor:
                 # print('device_time: {:.3f}'.format(one_data_time - end))
 
                 # compute output
-                x = torch.cat((x_s, x_t), dim=0)    #此处相当于batchsize变大两倍，可以不cat，使bs与设置保持一直
+                # x = torch.cat((x_s, x_t), dim=0)    #此处相当于batchsize变大两倍，可以不cat，使bs与设置保持一直
                 # pre_time = time.time()
                 # print('pre_time: {:.3f}'.format(pre_time - one_data_time ))
-                y, f = model(x)
+                # y, f = model(x)
                 # model_time = time.time()
                 # print('model_time: {:.3f}'.format(model_time - pre_time))
-                y_s, y_t = y.chunk(2, dim=0)
-                f_s, f_t = f.chunk(2, dim=0)
+                # y_s, y_t = y.chunk(2, dim=0)
+                # f_s, f_t = f.chunk(2, dim=0)
                 # post_time = time.time()
                 # print('post_time: {:.3f}'.format(post_time - model_time))
 
@@ -428,7 +433,8 @@ class CategoryAdaptor:
                         print('best acc at epoch {} update to {}'.format(epoch, acc1))
                         best_epoch = epoch
                         best_acc1_test = acc1
-                
+            if distributed:
+                dist.barrier()    
 
             # save checkpoint
             if comm.is_main_process():
@@ -449,15 +455,21 @@ class CategoryAdaptor:
         # switch to evaluate mode
         self.model.eval()
         predictions = deque()
+        predictions_rank = []
         # print(self.model.device)
         if comm.is_main_process():
             print('************ Category Predicting ************')
         with torch.no_grad():
             end_time = time.time()
-            for images, _ in tqdm.tqdm(data_loader):
+            # for images, _ in tqdm.tqdm(data_loader):
+            for i, one_data in enumerate(data_loader):
+                start_time = time.time()
+                images, _ = one_data
                 data_time = time.time()
-                # print('data time: {:.3f}'.format(data_time- end_time))
+                # print('>>>>>>>>')
+                # print('data time: {:.3f}'.format(data_time- start_time))
                 images = images.to(device)
+                
                 device_time = time.time()
                 # print('device_time: {:.3f}'.format(device_time- data_time))
                 # compute output
@@ -465,11 +477,27 @@ class CategoryAdaptor:
                 model_time = time.time()
                 # print('model_time: {:.3f}'.format(model_time - device_time))
                 prediction = output.argmax(-1).cpu().numpy().tolist()
+
                 for p in prediction:
-                    predictions.append(p)
-                post_time = time.time()
+                    predictions_rank.append(p)
+
+                if  i % self.args.print_freq == 0 and i != 0 and comm.is_main_process():
+                    print_time = time.time() - end_time
+                    current_time = time.strftime('%m-%d %H:%M:%S',time.localtime(time.time()))
+                    # print(images.shape, images.device)
+                    print('{} Print time per {}/{} iter: {:.3f} Seconds  |  Estimated complete time: {:.1f} Mins'.format(
+                        current_time, self.args.print_freq, len(data_loader), print_time, print_time / self.args.print_freq * len(data_loader) / 60))
+                    end_time = time.time()
+
+                # for p in prediction:
+                #     predictions.append(p)
+                # post_time = time.time()
                 # print('post_time: {:.3f}'.format(post_time - model_time))
-                end_time = time.time()
+                # end_time = time.time()
+        predictions_all_rank = comm.all_gather(predictions_rank)
+        for p in predictions_all_rank:
+            predictions.append(p)
+
         return predictions
 
     @staticmethod
@@ -589,9 +617,13 @@ class CategoryAdaptor:
         parser.add_argument('--epsilon-c', default=0.01, type=float,
                             help='epsilon hyper-parameter in Robust Cross Entropy')
         # training parameters
-        parser.add_argument('--batch-size-c', default=64, type=int,
+        parser.add_argument('--batch-size-c', default=96, type=int,
                             metavar='N',
                             help='mini-batch size (default: 64)')   #96
+        parser.add_argument('--inference-batch-size-c', default=512, type=int,
+                            metavar='N',
+                            help='mini-batch size (default: 64)')   #96
+
                             # 64，实际预测时，会把source和target cat到一起，batch_size会变成2倍
         parser.add_argument('--learning-rate-c', default=0.01, type=float,
                             metavar='LR', help='initial learning rate', dest='lr')
@@ -603,9 +635,9 @@ class CategoryAdaptor:
                             dest='weight_decay')
         parser.add_argument('--workers-c', default=8, type=int, metavar='N',
                             help='number of data loading workers (default: 2)')
-        parser.add_argument('--epochs-c', default=2, type=int, metavar='N',
+        parser.add_argument('--epochs-c', default=1, type=int, metavar='N',
                             help='number of total epochs to run')   # 10
-        parser.add_argument('--iters-per-epoch-c', default=1000, type=int,
+        parser.add_argument('--iters-per-epoch-standard-c', default=1000, type=int,
                             help='Number of iterations per epoch')
         parser.add_argument('--iters-perepoch-mode', default='compute_from_epoch', type=str,
                             help='iters-perepoch-mode')    

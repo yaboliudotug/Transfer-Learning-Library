@@ -140,7 +140,8 @@ def train(model, logger, cfg, args, args_cls, args_box):
 
     # train the category adaptor
     category_adaptor = category_adaptation.CategoryAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "cls"), args_cls)
-    if not category_adaptor.load_checkpoint():
+    # if not category_adaptor.load_checkpoint():
+    if True:
         data_loader_source = category_adaptor.prepare_training_data(prop_s_fg + prop_s_bg, True)
         data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False)
         data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg)

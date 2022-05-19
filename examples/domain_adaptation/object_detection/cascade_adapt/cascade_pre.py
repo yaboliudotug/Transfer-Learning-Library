@@ -4,15 +4,18 @@
 @contact: JiangJunguang1123@outlook.com
 """
 import logging
+from operator import mod
 import os
 import argparse
 import shutil
+from statistics import mode
 import sys
 import pprint
 from time import sleep
 import numpy as np
 import cv2
 import tqdm
+import time
 
 import torch
 from torch.nn.parallel import DistributedDataParallel
@@ -48,6 +51,15 @@ import bbox_adaptation_new1
 def mprint(input):
     if comm.is_main_process():
         print(input)
+
+def cal_gpu(module):
+    if isinstance(module, torch.nn.DataParallel):
+        module = module.module
+    for submodule in module.children():
+        if hasattr(submodule, "_parameters"):
+            parameters = submodule._parameters
+            if "weight" in parameters:
+                return parameters["weight"].device
 
 def generate_proposals(model, num_classes, dataset_names, cache_root, cfg):
     """Generate foreground proposals and background proposals from `model` and save them to the disk"""
@@ -101,7 +113,7 @@ def show_gt_pred(proposal_list, class_names, save_dir, scale=0.5):
         img_np = cv2.resize(img_np, (int(img_width * scale), int(img_height * scale)))
         cv2.imwrite(os.path.join(save_dir, os.path.basename(file_path)), img_np)
 
-def generate_category_labels(prop, category_adaptor, cache_filename):
+def generate_category_labels(prop, category_adaptor, cache_filename, debug=False, distributed=False):
     """Generate category labels for each proposals in `prop` and save them to the disk"""
     prop_w_category = PersistentProposalList(cache_filename)
     if not prop_w_category.load():
@@ -109,7 +121,10 @@ def generate_category_labels(prop, category_adaptor, cache_filename):
             prop_w_category.append(p)
 
         # data_loader_test = category_adaptor.prepare_test_data(flatten(prop_w_category), distributed=distributed)
-        data_loader_test = category_adaptor.prepare_test_data(flatten(prop_w_category))
+        # all
+        # if debug:
+
+        data_loader_test = category_adaptor.prepare_test_data(flatten(prop_w_category), distributed)
         predictions = category_adaptor.predict(data_loader_test)
         for p in prop_w_category:
             p.pred_classes = np.array([predictions.popleft() for _ in range(len(p))])
@@ -199,7 +214,8 @@ def train(model, logger, cfg, args, args_cls, args_box):
     prop_t_fg, prop_t_bg = generate_proposals(model, len(classes), args.targets, cache_proposal_root, cfg)
     prop_s_fg, prop_s_bg = generate_proposals(model, len(classes), args.sources, cache_proposal_root, cfg)
     # prop_test_fg, prop_test_bg = generate_proposals(model, len(classes), args.test, cache_proposal_root, cfg)
-    model = model.to(torch.device('cpu'))
+    
+    model.to(torch.device('cpu'))
 
     # if args.debug:
     #     source_num = 156
@@ -228,21 +244,25 @@ def train(model, logger, cfg, args, args_cls, args_box):
             # data_loader_test = category_adaptor.prepare_validation_data(prop_test_fg + prop_test_bg)
             # 使用source domain的proposal进行训练，而不仅仅是gt，因为gt数量过少，且不具有roi的特征代表性
             # category_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, distributed=distributed, num_gpus=num_gpus)
-            category_adaptor.fit(data_loader_source, data_loader_target, distributed=distributed, num_gpus=num_gpus)
+            
+            # category_adaptor.fit(data_loader_source, data_loader_target, distributed=distributed, num_gpus=num_gpus)
+
+        
+        if args.use_best_category is not None:
+            category_adaptor.model.to(torch.device("cpu"))
+            if comm.is_main_process():
+                print('loading best category adaptor......')
+            category_adaptor.load_checkpoint(name=args.use_best_category)
+        category_adaptor.model.cuda()
 
 
         # generate category labels for each proposals
         cache_feedback_root = os.path.join(cfg.OUTPUT_DIR, "cache", "feedback")
-        if args.use_best_category is not None:
-            print('loading best category adaptor...')
-            category_adaptor.load_checkpoint(name=args.use_best_category)
-            category_adaptor.model.cuda()
-            print('loading done.')
         prop_t_fg = generate_category_labels(
-            prop_t_fg, category_adaptor, os.path.join(cache_feedback_root, "{}_fg_{}.json".format(args.targets[0], cascade_id))
+            prop_t_fg, category_adaptor, os.path.join(cache_feedback_root, "{}_fg_{}.json".format(args.targets[0], cascade_id)), debug=args.debug, distributed=distributed
         )
         prop_t_bg = generate_category_labels(
-            prop_t_bg, category_adaptor, os.path.join(cache_feedback_root, "{}_bg_{}.json".format(args.targets[0], cascade_id))
+            prop_t_bg, category_adaptor, os.path.join(cache_feedback_root, "{}_bg_{}.json".format(args.targets[0], cascade_id)), debug=args.debug, distributed=distributed
         )
         # 在此加入两个数据集的评估结果
         category_adaptor.model.to(torch.device("cpu"))
@@ -366,6 +386,19 @@ def main(args, args_cls, args_box):
         )
         return utils.validate(model, logger, cfg, args)
 
+    # print('Moving detection model to cpu ...')
+    # print((next(model.parameters()).device))
+    # time.sleep(10)
+    # print('move!')
+    # model.to(torch.device('cpu'))
+    # print('done')
+    # print((next(model.parameters()).device))
+    # time.sleep(10)
+    # print('move again ...')
+    # model.to(torch.device(cfg.MODEL.DEVICE))
+    # print('done')
+    # print((next(model.parameters()).device))
+    # time.sleep(10)
 
     train(model, logger, cfg, args, args_cls, args_box)
 
@@ -383,7 +416,7 @@ if __name__ == "__main__":
     # pprint.pprint(args_box)
 
     parser = argparse.ArgumentParser(add_help=True)
-    parser.add_argument('--num-cascade', default=3, type=int, help='num_category_cascade')
+    parser.add_argument('--num-cascade', default=60, type=int, help='num_category_cascade')
     parser.add_argument('--use-best-category', default='best_test', type=str, help='use-best')
     parser.add_argument('--use-best-bbox', default='best_test', type=str, help='use-best')
     parser.add_argument('--show-gt', default='show_gt', type=str, help='show_gt')

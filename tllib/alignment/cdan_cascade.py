@@ -116,9 +116,9 @@ class ConditionalDomainAdversarialLoss(nn.Module):
             ))
             self.domain_discriminator_accuracy = binary_accuracy(d, d_label)
             if self.entropy_conditioning:
-                return F.binary_cross_entropy(d, d_label, weight.view_as(d), reduction=self.reduction)
+                return F.binary_cross_entropy(d, d_label, weight.view_as(d), reduction=self.reduction), self.domain_discriminator_accuracy
             else:
-                return F.binary_cross_entropy(d, d_label, reduction=self.reduction)
+                return F.binary_cross_entropy(d, d_label, reduction=self.reduction), self.domain_discriminator_accuracy
         else:
             d_label = torch.cat((
                 torch.ones((g_s.size(0), )).to(g_s.device),
@@ -127,7 +127,7 @@ class ConditionalDomainAdversarialLoss(nn.Module):
             self.domain_discriminator_accuracy = accuracy(d, d_label)
             if self.entropy_conditioning:
                 raise NotImplementedError("entropy_conditioning")
-            return F.cross_entropy(d, d_label, reduction=self.reduction)
+            return F.cross_entropy(d, d_label, reduction=self.reduction), self.domain_discriminator_accuracy
 
 
 class RandomizedMultiLinearMap(nn.Module):
