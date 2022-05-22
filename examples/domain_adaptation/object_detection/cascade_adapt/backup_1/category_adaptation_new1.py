@@ -33,7 +33,6 @@ from torch.utils.data.distributed import DistributedSampler
 import torch.distributed as dist
 
 import detectron2.utils.comm as comm
-from detectron2.data.samplers.distributed_sampler import InferenceSampler
 
 sys.path.append('../../../..')
 from tllib.modules.domain_discriminator import DomainDiscriminator
@@ -133,8 +132,7 @@ class CategoryAdaptor:
         else:
             return False
 
-    def prepare_training_data(self, proposal_list: List[Proposal], labeled=True, domain_flag='source', 
-                            distributed=False, crop_img_dir=None):
+    def prepare_training_data(self, proposal_list: List[Proposal], labeled=True, domain_flag='source', distributed=False):
         if not labeled:
             # remove proposals with confidence score between (ignored_scores[0], ignored_scores[1])
             filtered_proposals_list = []
@@ -170,7 +168,7 @@ class CategoryAdaptor:
             normalize
         ])
 
-        dataset = ProposalDataset(filtered_proposals_list, transform, crop_img_dir=crop_img_dir)
+        dataset = ProposalDataset(filtered_proposals_list, transform)
         if distributed:
             # print('distribute dataset ......')
             if domain_flag == 'source':
@@ -189,7 +187,7 @@ class CategoryAdaptor:
         # ))
         return dataloader
 
-    def prepare_validation_data(self, proposal_list: List[Proposal], distributed=False, crop_img_dir=None):
+    def prepare_validation_data(self, proposal_list: List[Proposal], distributed=False):
         """call this function if you have labeled data for validation"""
         normalize = T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         transform = T.Compose([
@@ -205,7 +203,7 @@ class CategoryAdaptor:
             filtered_proposals_list.append(proposals[keep_indices])
 
         filtered_proposals_list = flatten(filtered_proposals_list, self.args.max_val)
-        dataset = ProposalDataset(filtered_proposals_list, transform, crop_img_dir=crop_img_dir)
+        dataset = ProposalDataset(filtered_proposals_list, transform)
         # dataset = ProposalDatasetTest(filtered_proposals_list, transform)   # !!!!!
         # if distributed:
         #     sampler = DistributedSampler(dataset, drop_last=False)
@@ -218,7 +216,7 @@ class CategoryAdaptor:
         #     len(dataset), self.args.batch_size, len(dataloader)))
         return dataloader
 
-    def prepare_test_data(self, proposal_list: List[Proposal], distributed=False, crop_img_dir=None):
+    def prepare_test_data(self, proposal_list: List[Proposal], distributed=False):
         normalize = T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         transform = T.Compose([
             ResizeImage(self.args.resize_size),
@@ -226,10 +224,9 @@ class CategoryAdaptor:
             normalize
         ])
 
-        dataset = ProposalDataset(proposal_list, transform, crop_img_dir=crop_img_dir)
+        dataset = ProposalDataset(proposal_list, transform)
         if distributed:
-            # sampler = DistributedSampler(dataset)
-            sampler = InferenceSampler(len(dataset))
+            sampler = DistributedSampler(dataset)
             dataloader = DataLoader(dataset, batch_size=self.args.inference_batch_size,
                                 sampler=sampler, num_workers=self.args.workers)
         else:
@@ -310,7 +307,6 @@ class CategoryAdaptor:
             args.iters_per_epoch = standard_iters_per_epoch_one_gpu  // num_gpus
 
         if args.debug:
-            args.epochs = 1
             args.iters_per_epoch = 21
 
         if comm.is_main_process():
@@ -413,8 +409,8 @@ class CategoryAdaptor:
                 batch_time.update(time.time() - end)
                 end = time.time()
 
-                # if distributed:
-                #     dist.barrier()
+                if distributed:
+                    dist.barrier()
 
                 if i % args.print_freq == 0 and i != 0 and comm.is_main_process():
                     progress.display(i)
@@ -669,7 +665,7 @@ class CategoryAdaptor:
                             dest='weight_decay')
         parser.add_argument('--workers-c', default=4, type=int, metavar='N',
                             help='number of data loading workers (default: 2)')
-        parser.add_argument('--epochs-c', default=8, type=int, metavar='N',
+        parser.add_argument('--epochs-c', default=1, type=int, metavar='N',
                             help='number of total epochs to run')   # 10
         parser.add_argument('--iters-per-epoch-standard-c', default=1000, type=int,
                             help='Number of iterations per epoch')

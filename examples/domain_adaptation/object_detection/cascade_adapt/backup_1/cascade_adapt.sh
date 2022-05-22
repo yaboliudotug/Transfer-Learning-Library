@@ -27,24 +27,24 @@
 #   --resume \
 #   OUTPUT_DIR logs/faster_rcnn_R_101_C4/voc2clipart/phase3 MODEL.WEIGHTS ${pretrained_models} SEED 0
 
-# pretrained_models=logs/faster_rcnn_R_101_C4/voc2clipart/phase3/model_final.pth
-# CUDA_VISIBLE_DEVICES=3 python cascade_adapt.py --num-gpus 1 --confidence-ratio-c 0.2 \
-#   --config-file config/faster_rcnn_R_101_C4_voc.yaml \
-#   -s VOC2007 ../datasets/VOC2007 VOC2012 ../datasets/VOC2012  \
-#   -t Clipart ../datasets/clipart --test Clipart ../datasets/clipart \
-#   --finetune --bbox-refine \
-#   --resume \
-#   OUTPUT_DIR logs/faster_rcnn_R_101_C4/voc2clipart/phase4 MODEL.WEIGHTS ${pretrained_models} SEED 0
+pretrained_models=logs/faster_rcnn_R_101_C4/voc2clipart/phase3/model_final.pth
+CUDA_VISIBLE_DEVICES=3 python cascade_adapt.py --num-gpus 1 --confidence-ratio-c 0.2 \
+  --config-file config/faster_rcnn_R_101_C4_voc.yaml \
+  -s VOC2007 ../datasets/VOC2007 VOC2012 ../datasets/VOC2012  \
+  -t Clipart ../datasets/clipart --test Clipart ../datasets/clipart \
+  --finetune --bbox-refine \
+  --resume \
+  OUTPUT_DIR logs/faster_rcnn_R_101_C4/voc2clipart/phase4 MODEL.WEIGHTS ${pretrained_models} SEED 0
 
 
 # # ResNet101 Based Faster RCNN: Faster RCNN: VOC->WaterColor
 # # 54.1
-# pretrained_models=../logs/source_only/faster_rcnn_R_101_C4/voc2watercolor_comic/model_final.pth
-# CUDA_VISIBLE_DEVICES=2 python cascade_adapt.py --num-gpus 1 \
-#   --config-file config/faster_rcnn_R_101_C4_voc.yaml \
-#   -s VOC2007Partial ../datasets/VOC2007 VOC2012Partial ../datasets/VOC2012  \
-#   -t WaterColor ../datasets/watercolor --test WaterColorTest ../datasets/watercolor --finetune --bbox-refine \
-#   OUTPUT_DIR logs/faster_rcnn_R_101_C4/voc2watercolor/phase1 MODEL.ROI_HEADS.NUM_CLASSES 6 MODEL.WEIGHTS ${pretrained_models} SEED 0
+pretrained_models=../logs/source_only/faster_rcnn_R_101_C4/voc2watercolor_comic/model_final.pth
+CUDA_VISIBLE_DEVICES=2 python cascade_adapt.py --num-gpus 1 \
+  --config-file config/faster_rcnn_R_101_C4_voc.yaml \
+  -s VOC2007Partial ../datasets/VOC2007 VOC2012Partial ../datasets/VOC2012  \
+  -t WaterColor ../datasets/watercolor --test WaterColorTest ../datasets/watercolor --finetune --bbox-refine \
+  OUTPUT_DIR logs/faster_rcnn_R_101_C4/voc2watercolor/phase1 MODEL.ROI_HEADS.NUM_CLASSES 6 MODEL.WEIGHTS ${pretrained_models} SEED 0
 
 # # 57.5
 # pretrained_models=logs/faster_rcnn_R_101_C4/voc2watercolor/phase1/model_final.pth
@@ -73,20 +73,20 @@
 
 # # ResNet101 Based Faster RCNN: Cityscapes -> Foggy Cityscapes
 # # 40.1
-pretrained_models=../logs/source_only/faster_rcnn_R_101_C4/cityscapes2foggy/model_final.pth
-CUDA_VISIBLE_DEVICES=0,1 python cascade_pre.py  --num-gpus 2 --workers-c 4 --max-train-c 20 --ignored-scores-c 0.05 0.5 --confidence-ratio-c 0.1 \
-  --config-file config/faster_rcnn_R_101_C4_cityscapes.yaml \
-  -s Cityscapes ../datasets/cityscapes_in_voc -t FoggyCityscapes ../datasets/foggy_cityscapes_in_voc/  \
-  --test FoggyCityscapesTest ../datasets/foggy_cityscapes_in_voc/ --finetune --trade-off 0.5 --bbox-refine \
-  OUTPUT_DIR logs/faster_rcnn_R_101_C4/cityscapes2foggy_5/phase1 MODEL.WEIGHTS ${pretrained_models} SEED 0
-
-# # 42.4
-# pretrained_models=logs/faster_rcnn_R_101_C4/cityscapes2foggy_2/phase1/model_final.pth
-# CUDA_VISIBLE_DEVICES=0,1,2,3 python cascade_pre.py --num-gpus 4 --workers-c 4 --max-train-c 20 --ignored-scores-c 0.05 0.5 --confidence-ratio-c 0.2 \
+# pretrained_models=../logs/source_only/faster_rcnn_R_101_C4/cityscapes2foggy/model_final.pth
+# CUDA_VISIBLE_DEVICES=0,1,2,3 python d_adapt.py --num-gpus 4 --workers-c 4 --max-train-c 20 --ignored-scores-c 0.05 0.5 \
 #   --config-file config/faster_rcnn_R_101_C4_cityscapes.yaml \
 #   -s Cityscapes ../datasets/cityscapes_in_voc -t FoggyCityscapes ../datasets/foggy_cityscapes_in_voc/  \
 #   --test FoggyCityscapesTest ../datasets/foggy_cityscapes_in_voc/ --finetune --trade-off 0.5 --bbox-refine \
-#   OUTPUT_DIR logs/faster_rcnn_R_101_C4/cityscapes2foggy_2/phase2 MODEL.WEIGHTS ${pretrained_models} SEED 0
+#   OUTPUT_DIR logs/faster_rcnn_R_101_C4/cityscapes2foggy/phase1 MODEL.WEIGHTS ${pretrained_models} SEED 0
+
+# # 42.4
+# pretrained_models=logs/faster_rcnn_R_101_C4/cityscapes2foggy/phase1/model_final.pth
+# CUDA_VISIBLE_DEVICES=0,1,2,3 python d_adapt.py --num-gpus 4 --workers-c 4 --max-train-c 20 --ignored-scores-c 0.05 0.5 --confidence-ratio-c 0.1 \
+#   --config-file config/faster_rcnn_R_101_C4_cityscapes.yaml \
+#   -s Cityscapes ../datasets/cityscapes_in_voc -t FoggyCityscapes ../datasets/foggy_cityscapes_in_voc/  \
+#   --test FoggyCityscapesTest ../datasets/foggy_cityscapes_in_voc/ --finetune --trade-off 0.5 --bbox-refine \
+#   OUTPUT_DIR logs/faster_rcnn_R_101_C4/cityscapes2foggy/phase2 MODEL.WEIGHTS ${pretrained_models} SEED 0
 
 
 # # VGG Based Faster RCNN: Cityscapes -> Foggy Cityscapes

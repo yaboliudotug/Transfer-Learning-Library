@@ -5,17 +5,11 @@ Training a bounding box adaptor
 """
 import random
 import time
-from tkinter.messagebox import NO
 import warnings
 import os.path as osp
 import argparse
 from collections import deque
 import tqdm
-
-# from cascade_pre import mprint
-from torch.nn.parallel import DistributedDataParallel
-import detectron2.utils.comm as comm
-import torch.distributed as dist
 
 import torch
 import torch.nn as nn
@@ -25,9 +19,7 @@ from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
 import torchvision.transforms as T
 import torch.nn.functional as F
-from torch.utils.data.distributed import DistributedSampler
 from detectron2.modeling.box_regression import Box2BoxTransform
-from detectron2.data.samplers.distributed_sampler import InferenceSampler
 
 from tllib.utils.data import ForeverDataIterator
 from tllib.utils.meter import AverageMeter, ProgressMeter
@@ -120,10 +112,10 @@ class BoundingBoxAdaptor:
         for k, v in args._get_kwargs():
             setattr(args, k.replace("_b", ""), v)
         self.args = args
-        # print(self.args)
+        print(self.args)
         self.logger = CompleteLogger(log)
         # create model
-        # print("=> using pre-trained model '{}'".format(args.arch))
+        print("=> using pre-trained model '{}'".format(args.arch))
         backbone = utils.get_model(args.arch, pretrain=not args.scratch)
         num_classes = len(class_names)
         bottleneck_dim = args.bottleneck_dim
@@ -162,18 +154,17 @@ class BoundingBoxAdaptor:
         ).to(device)
         self.box_transform = BoxTransform()
 
-    def load_checkpoint(self, path=None, name='latest'):
+    def load_checkpoint(self, path=None):
         if path is None:
-            path = self.logger.get_checkpoint_path(name)
+            path = self.logger.get_checkpoint_path('latest')
         if osp.exists(path):
-            checkpoint = torch.load(self.logger.get_checkpoint_path(name), map_location='cuda:{}'.format(comm.get_local_rank()))
-            # checkpoint = torch.load(path, map_location='cpu')
+            checkpoint = torch.load(path, map_location='cpu')
             self.model.load_state_dict(checkpoint)
             return True
         else:
             return False
 
-    def prepare_training_data(self, proposal_list: PersistentProposalList, labeled=True, domain_flag='source', distributed=False):
+    def prepare_training_data(self, proposal_list: PersistentProposalList, labeled=True):
         if not labeled:
             # remove (predicted) background proposals
             filtered_proposals_list = []
@@ -199,19 +190,10 @@ class BoundingBoxAdaptor:
         ])
 
         dataset = ProposalDataset(filtered_proposals_list, transform, crop_func=ExpandCrop(self.args.expand))
-        if distributed:
-            if domain_flag == 'source':
-                self.source_train_sampler = DistributedSampler(dataset, drop_last=True)
-                dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
-                                    sampler=self.source_train_sampler, num_workers=self.args.workers, drop_last=True)
-            elif domain_flag == 'target':
-                self.target_train_sampler = DistributedSampler(dataset, drop_last=True)
-                dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
-                                    sampler=self.target_train_sampler, num_workers=self.args.workers, drop_last=True)
-
-
         dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
                                 shuffle=True, num_workers=self.args.workers, drop_last=True)
+        print('******')
+        print(self.args.batch_size)
         return dataloader
 
     def prepare_validation_data(self, proposal_list: PersistentProposalList):
@@ -231,12 +213,11 @@ class BoundingBoxAdaptor:
 
         filtered_proposals_list = flatten(filtered_proposals_list, self.args.max_val)
         dataset = ProposalDataset(filtered_proposals_list, transform, crop_func=ExpandCrop(self.args.expand))
-        # dataset = ProposalDatasetTest(filtered_proposals_list, transform, crop_func=ExpandCrop(self.args.expand))
         dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
                                 shuffle=False, num_workers=self.args.workers, drop_last=False)
         return dataloader
 
-    def prepare_test_data(self, proposal_list: PersistentProposalList, distributed=False):
+    def prepare_test_data(self, proposal_list: PersistentProposalList):
         normalize = T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         transform = T.Compose([
             T.Resize((self.args.resize_size, self.args.resize_size)),
@@ -245,10 +226,6 @@ class BoundingBoxAdaptor:
         ])
 
         dataset = ProposalDataset(proposal_list, transform, crop_func=ExpandCrop(self.args.expand))
-        if distributed:
-            sampler = InferenceSampler(len(dataset))
-            dataloader = DataLoader(dataset, batch_size=self.args.inference_batch_size,
-                                sampler=sampler, num_workers=self.args.workers, drop_last=False)
         dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
                                 shuffle=False, num_workers=self.args.workers, drop_last=False)
         return dataloader
@@ -257,7 +234,6 @@ class BoundingBoxAdaptor:
         # switch to evaluate mode
         self.model.eval()
         predictions = deque()
-        predictions_rank = []
 
         with torch.no_grad():
             for images, labels in tqdm.tqdm(data_loader):
@@ -269,17 +245,8 @@ class BoundingBoxAdaptor:
                 _, pred_boxes = self.box_transform(pred_deltas, pred_classes, pred_boxes)
                 pred_boxes = clamp(pred_boxes.cpu(), labels['width'], labels['height'])
                 pred_boxes = pred_boxes.numpy().tolist()
-                # for p in pred_boxes:
-                #     predictions.append(p)
                 for p in pred_boxes:
-                    predictions_rank.append(p)
-        predictions_all_rank = comm.all_gather(predictions_rank)
-        predictions_res = []
-        for one in predictions_all_rank:
-            for p in one:
-                predictions_res.append(p)
-        for p in predictions_res:
-            predictions.append(p)
+                    predictions.append(p)
         return predictions
 
     def validate_baseline(self, val_loader):
@@ -332,10 +299,10 @@ class BoundingBoxAdaptor:
 
         return ious.avg
 
-    def fit(self, data_loader_source, data_loader_target, data_loader_validation=None, data_loader_test=None, distributed=False, num_gpus=1, debug=False):
+    def fit(self, data_loader_source, data_loader_target, data_loader_validation=None):
         """When no labels exists on target domain, please set data_loader_validation=None"""
         args = self.args
-        # print(args)
+        print(args)
         if args.seed is not None:
             random.seed(args.seed)
             torch.manual_seed(args.seed)
@@ -353,9 +320,6 @@ class BoundingBoxAdaptor:
 
 
         best_iou = 0.
-        best_iou_test = 0.
-        best_epoch_target = 0
-        best_epoch_test = 0
         box_transform = self.box_transform
 
         # first pre-train on the source domain
@@ -368,33 +332,17 @@ class BoundingBoxAdaptor:
             head=nn.Linear(self.model.backbone.out_features, len(self.class_names) * 4),
             bottleneck_dim=self.model.backbone.out_features
         ).to(device)
-        if distributed:
-            model = DistributedDataParallel(
-                model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True
-            )
-
-
         optimizer = Adam(model.get_parameters(), args.pretrain_lr, weight_decay=args.pretrain_weight_decay)
         lr_scheduler = LambdaLR(optimizer, lambda x: args.pretrain_lr * (1. + args.pretrain_lr_gamma * float(x)) ** (-args.pretrain_lr_decay))
 
-        
-
-
         if args.iters_perepoch_mode == 'compute_from_epoch':
             num_iters_source = len(iter_source)
-            args.iters_per_epoch = int(num_iters_source * args.coefficient)
-        if debug:
-            args.pretrain_epochs = 1
-            args.iters_per_epoch = 21
-
-        if comm.is_main_process():
-            print('################# bbox pretraining ################')
-            print('num iters per epoch:', args.iters_per_epoch)
-
-
-
+            args.iters_per_epoch = int(num_iters_source / args.batch_size)
+            args.iters_per_epoch = args.iters_per_epoch * args.coefficient
+        
+        print('num iters per epoch:', args.iters_per_epoch)
         for epoch in range(args.pretrain_epochs):
-            # print("lr:", lr_scheduler.get_last_lr()[0])
+            print("lr:", lr_scheduler.get_last_lr()[0])
             batch_time = AverageMeter('Time', ':3.1f')
             data_time = AverageMeter('Data', ':3.1f')
             losses = AverageMeter('Loss', ':3.2f')
@@ -408,7 +356,6 @@ class BoundingBoxAdaptor:
             model.train()
 
             end = time.time()
-            print_end = time.time()
             for i in range(args.iters_per_epoch):
                 x_s, labels_s = next(iter_source)
                 x_s = x_s.to(device)
@@ -440,65 +387,31 @@ class BoundingBoxAdaptor:
                 batch_time.update(time.time() - end)
                 end = time.time()
 
-                if i % args.print_freq == 0 and i != 0 and comm.is_main_process():
+                if i % args.print_freq == 0:
                     progress.display(i)
-                    print_time = time.time() - print_end
-                    current_time = time.strftime('%m-%d %H:%M:%S',time.localtime(time.time()))
-                    print('{} Print time per {} iter: {:.3f} Seconds  |  Estimated complete time: {:.1f} Mins\n'.format(
-                        current_time, args.print_freq, print_time, print_time / args.print_freq * args.iters_per_epoch / 60))
-                    print_end = time.time()
-
-            if distributed:
-                dist.barrier()    
 
             # evaluate on validation set
-            if comm.is_main_process() and data_loader_validation is not None :
-                print('************ Category pretrain validating ************')
+            if data_loader_validation is not None:
                 iou = self.validate(data_loader_validation, model, box_transform, args)
                 best_iou = max(iou, best_iou)
-            # if data_loader_test is not None:
-            #     iou = self.validate(data_loader_test, model, box_transform, args)
-            #     best_iou = max(iou, best_iou)
-            if distributed:
-                dist.barrier()   
 
         model.to(torch.device("cpu"))
 
         # training on both domains
         model = self.model.cuda()
-        if distributed:
-            model = DistributedDataParallel(
-                model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True
-            )
         optimizer = SGD(model.get_parameters(), args.lr, momentum=args.momentum, weight_decay=args.weight_decay, nesterov=True)
         lr_scheduler = LambdaLR(optimizer, lambda x: args.lr * (1. + args.lr_gamma * float(x)) ** (-args.lr_decay))
 
+        print('#######')
         if args.iters_perepoch_mode == 'compute_from_epoch':
             num_iters_source = len(iter_source)
             num_iters_target = len(iter_target)
-            args.iters_per_epoch = int(max(num_iters_source, num_iters_target) * args.coefficient)
-        standard_iters_per_epoch_one_gpu = args.iters_per_epoch_standard * 64 // data_loader_source.batch_size
-        if args.iters_per_epoch > standard_iters_per_epoch_one_gpu // num_gpus:
-            args.iters_per_epoch = standard_iters_per_epoch_one_gpu  // num_gpus
-
-        if debug:
-            args.epochs = 1
-            args.iters_per_epoch = 21
-
-        if comm.is_main_process():
-            print('################# Bbox fitting ################')
-            print('Num iters per epoch: {}'.format(args.iters_per_epoch))
-            print('Num epochs: {}'.format(args.epochs))
-            print('Source dataset length: {}'.format(len(iter_source)))
-            print('Target dataset lengtht: {}'.format(len(iter_target)))
-        if data_loader_validation is not None and comm.is_main_process():
-            print('Validation dataset length: {}'.format(len(data_loader_validation)))
-        if data_loader_test is not None and comm.is_main_process():
-            print('Test dataset length: {}'.format(len(data_loader_test)))
-
+            args.iters_per_epoch = int(max(num_iters_source, num_iters_target) / args.batch_size)
+            args.iters_per_epoch = args.iters_per_epoch * args.coefficient
+        print('num iters per epoch:', args.iters_per_epoch)
 
         for epoch in range(args.epochs):
-            # print("lr:", lr_scheduler.get_last_lr()[0])
+            print("lr:", lr_scheduler.get_last_lr()[0])
             # train for one epoch
             batch_time = AverageMeter('Time', ':3.1f')
             data_time = AverageMeter('Data', ':3.1f')
@@ -515,10 +428,6 @@ class BoundingBoxAdaptor:
             # switch to train mode
             model.train()
             mdd = RegressionMarginDisparityDiscrepancy(args.margin).to(device)
-            if distributed:
-                mdd = DistributedDataParallel(
-                mdd, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True
-            )
 
             end = time.time()
             for i in range(args.iters_per_epoch):
@@ -575,39 +484,19 @@ class BoundingBoxAdaptor:
                 batch_time.update(time.time() - end)
                 end = time.time()
 
-                if i % args.print_freq == 0 and comm.is_main_process():
+                if i % args.print_freq == 0:
                     progress.display(i)
 
-                if distributed:
-                    dist.barrier()
-
             # evaluate on validation set
-            if data_loader_validation is not None and comm.is_main_process():
-                print('************ Category fit validating ************')
+            if data_loader_validation is not None:
                 iou = self.validate(data_loader_validation, model, box_transform, args)
-                if iou > best_iou:
-                    torch.save(model.state_dict(), self.logger.get_checkpoint_path('best'))
-                    print('best iou at epoch {} update to {}'.format(epoch, best_iou))
-                    best_iou = iou
-                    best_epoch_target = epoch
-            # if data_loader_test is not None:
-            #     iou = self.validate(data_loader_test, model, box_transform, args)
-            #     if iou > best_iou_test:
-            #         torch.save(model.state_dict(), self.logger.get_checkpoint_path('best_test'))
-            #         print('best best_iou_test at epoch {} update to {}'.format(epoch, best_iou_test))
-            #         best_iou_test = iou
-            #         best_epoch_test = epoch
+                best_iou = max(iou, best_iou)
 
             # save checkpoint
-            if distributed:
-                    dist.barrier()
-            if comm.is_main_process():
-                torch.save(model.state_dict(), self.logger.get_checkpoint_path('latest'))
-            mdd.to(torch.device("cpu"))
+            torch.save(model.state_dict(), self.logger.get_checkpoint_path('latest'))
 
-        print("best_iou_target = {:3.1f} at epoch {}".format(best_iou, best_epoch_target))
-        # print("best_iou_test = {:3.1f} at epoch {}".format(best_iou_test, best_epoch_test))
-        # model.to(torch.device("cpu"))
+        print("best_iou = {:3.1f}".format(best_iou))
+
         self.logger.logger.flush()
 
     @staticmethod
@@ -636,12 +525,12 @@ class BoundingBoxAdaptor:
         parser.add_argument('--trade-off', default=0.1, type=float,
                             help='the trade-off hyper-parameter for transfer loss')
         # training parameters
-        parser.add_argument('--batch-size-b', default=48, type=int,
+        parser.add_argument('--batch-size-b', default=24, type=int,
                             metavar='N',
                             help='mini-batch size (default: 64)') # 32
         parser.add_argument('--iters-perepoch-mode', default='compute_from_epoch', type=str,
                             help='iters-perepoch-mode')     
-        parser.add_argument('--coefficient', default=10, type=int,
+        parser.add_argument('--coefficient', default=5, type=int,
                             help='iters-perepoch-mode coefficient')                        
         parser.add_argument('--lr-b', default=0.004, type=float,
                             metavar='LR', help='initial learning rate')
@@ -652,19 +541,17 @@ class BoundingBoxAdaptor:
         parser.add_argument('--momentum', default=0.9, type=float, metavar='M', help='momentum')
         parser.add_argument('--workers-b', default=4, type=int, metavar='N',
                             help='number of data loading workers (default: 2)')
-        parser.add_argument('--epochs-b', default=1, type=int, metavar='N',
-                            help='number of total epochs to run')   #10
+        parser.add_argument('--epochs-b', default=10, type=int, metavar='N',
+                            help='number of total epochs to run')
         parser.add_argument('--pretrain-lr-b', default=0.001, type=float,
                             metavar='LR', help='initial learning rate')
         parser.add_argument('--pretrain-lr-gamma-b', default=0.0002, type=float, help='parameter for lr scheduler')
         parser.add_argument('--pretrain-lr-decay-b', default=0.75, type=float, help='parameter for lr scheduler')
         parser.add_argument('--pretrain-weight-decay-b', default=1e-3, type=float,
                             metavar='W', help='weight decay (default: 1e-3)')
-        parser.add_argument('--pretrain-epochs-b', default=1, type=int, metavar='N',
+        parser.add_argument('--pretrain-epochs-b', default=10, type=int, metavar='N',
                             help='number of total epochs to run')   # 10
         parser.add_argument('--iters-per-epoch-b', default=1000, type=int,
-                            help='Number of iterations per epoch')
-        parser.add_argument('--iters-per-epoch-standard-b', default=1000, type=int,
                             help='Number of iterations per epoch')
         parser.add_argument('--print-freq-b', default=100, type=int,
                             metavar='N', help='print frequency (default: 100)')

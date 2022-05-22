@@ -11,6 +11,15 @@ import json
 from typing import Optional, Callable, List
 import random
 import pprint
+import time
+import cv2
+
+from PIL import Image
+import torchvision
+
+from iopath.common.file_io import PathManager as PathManagerBase
+PathManager = PathManagerBase()
+
 
 import torchvision.datasets as datasets
 from torchvision.datasets.folder import default_loader
@@ -20,6 +29,84 @@ from detectron2.evaluation.evaluator import DatasetEvaluator
 from detectron2.data.dataset_mapper import DatasetMapper
 import detectron2.data.detection_utils as utils
 import detectron2.data.transforms as T
+
+_EXIF_ORIENT = 274  # exif 'Orientation' tag
+def _apply_exif_orientation(image):
+    """
+    Applies the exif orientation correctly.
+
+    This code exists per the bug:
+      https://github.com/python-pillow/Pillow/issues/3973
+    with the function `ImageOps.exif_transpose`. The Pillow source raises errors with
+    various methods, especially `tobytes`
+
+    Function based on:
+      https://github.com/wkentaro/labelme/blob/v4.5.4/labelme/utils/image.py#L59
+      https://github.com/python-pillow/Pillow/blob/7.1.2/src/PIL/ImageOps.py#L527
+
+    Args:
+        image (PIL.Image): a PIL image
+
+    Returns:
+        (PIL.Image): the PIL image with exif orientation applied, if applicable
+    """
+    if not hasattr(image, "getexif"):
+        return image
+
+    try:
+        exif = image.getexif()
+    except Exception:  # https://github.com/facebookresearch/detectron2/issues/1885
+        exif = None
+
+    if exif is None:
+        return image
+
+    orientation = exif.get(_EXIF_ORIENT)
+
+    method = {
+        2: Image.FLIP_LEFT_RIGHT,
+        3: Image.ROTATE_180,
+        4: Image.FLIP_TOP_BOTTOM,
+        5: Image.TRANSPOSE,
+        6: Image.ROTATE_270,
+        7: Image.TRANSVERSE,
+        8: Image.ROTATE_90,
+    }.get(orientation)
+
+    if method is not None:
+        return image.transpose(method)
+    return image
+
+
+def read_image(file_name, format=None):
+    """
+    Read an image into the given format.
+    Will apply rotation and flipping if the image has such exif information.
+
+    Args:
+        file_name (str): image file path
+        format (str): one of the supported image modes in PIL, or "BGR" or "YUV-BT.601".
+
+    Returns:
+        image (np.ndarray):
+            an HWC image in the given format, which is 0-255, uint8 for
+            supported image modes in PIL or "BGR"; float (0-1 for Y) for YUV-BT.601.
+    """
+    print('>>>>>')
+    time1 = time.time()
+    with PathManager.open(file_name, "rb") as f:
+        time2 = time.time()
+        image = Image.open(f)
+        time3 = time.time()
+        image.load()
+
+        # work around this bug: https://github.com/python-pillow/Pillow/issues/3973
+        # image = _apply_exif_orientation(image)
+        time4 = time.time()
+        print(file_name)
+        print('{:.3f} {:.3f} {:.3f}'.format(time2 - time1, time3 - time2, time4 - time3))
+        return image
+        # return convert_PIL_to_numpy(image, format)
 
 
 class ProposalMapper(DatasetMapper):
@@ -112,6 +199,8 @@ class ProposalGenerator(DatasetEvaluator):
         pred_boxes = output_instance.pred_boxes
         pred_scores = output_instance.scores
         pred_classes = output_instance.pred_classes
+        
+        # pred_ids = np.array(list(range(len(pred_classes))))
         proposal = Proposal(
             image_id=inputs[0]['image_id'],
             filename=filename,
@@ -144,6 +233,11 @@ class ProposalGenerator(DatasetEvaluator):
             else:
                 proposal.all_gt_classes = input_instance.gt_classes.numpy()
                 proposal.all_gt_boxes = input_instance.gt_boxes.tensor.numpy()
+        if pred_boxes.tensor.shape[0] == 0:
+            proposal.pred_ids = []
+        else:
+            pred_ids = list(range(pred_boxes.tensor.shape[0]))
+            proposal.pred_ids = pred_ids
 
         return proposal
 
@@ -172,7 +266,7 @@ class Proposal:
 
     """
     def __init__(self, image_id, filename, pred_boxes, pred_classes, pred_scores,
-                 gt_classes=None, gt_boxes=None, gt_ious=None, gt_fg_classes=None, all_gt_classes=None, all_gt_boxes=None):
+                 gt_classes=None, gt_boxes=None, gt_ious=None, gt_fg_classes=None, all_gt_classes=None, all_gt_boxes=None, pred_ids=None):
         self.image_id = image_id
         self.filename = filename
         self.pred_boxes = pred_boxes
@@ -184,6 +278,7 @@ class Proposal:
         self.gt_fg_classes = gt_fg_classes
         self.all_gt_classes = all_gt_classes
         self.all_gt_boxes = all_gt_boxes
+        self.pred_ids = pred_ids
 
     def to_dict(self):
         return {
@@ -198,7 +293,8 @@ class Proposal:
             "gt_ious": self.gt_ious.tolist(),
             "gt_fg_classes": self.gt_fg_classes.tolist(),
             "all_gt_boxes": self.all_gt_boxes.tolist(),
-            "all_gt_classes": self.all_gt_classes.tolist()
+            "all_gt_classes": self.all_gt_classes.tolist(),
+            "pred_ids": self.pred_ids
         }
 
     def __str__(self):
@@ -209,6 +305,7 @@ class Proposal:
         return len(self.pred_boxes)
 
     def __getitem__(self, item):
+        # print(self.pred_ids)
         return Proposal(
             image_id=self.image_id,
             filename=self.filename,
@@ -221,8 +318,7 @@ class Proposal:
             gt_fg_classes=self.gt_fg_classes[item],
             all_gt_boxes=self.all_gt_boxes,
             all_gt_classes=self.all_gt_classes,
-            # all_gt_boxes=self.all_gt_boxes[item],
-            # all_gt_classes=self.all_gt_classes[item]
+            pred_ids=self.pred_ids[item]
         )
 
 
@@ -251,6 +347,7 @@ def asProposal(dict):
             np.array(dict["gt_fg_classes"]),
             np.array(dict["all_gt_classes"]),
             np.array(dict["all_gt_boxes"]),
+            np.array(dict["pred_ids"])
         )
     return dict
 
@@ -317,29 +414,49 @@ class ProposalDataset(datasets.VisionDataset):
             and returns a transformed version. E.g, ``transforms.RandomCrop``
         crop_func: (ExpandCrop, optional):
     """
-    def __init__(self, proposal_list: List[Proposal], transform: Optional[Callable] = None, crop_func=None):
+    def __init__(self, proposal_list: List[Proposal], transform: Optional[Callable] = None, crop_func=None, crop_img_dir=None):
         super(ProposalDataset, self).__init__("", transform=transform)
         self.proposal_list = list(filter(lambda p: len(p) > 0, proposal_list))  # remove images without proposals
         self.loader = default_loader
         self.crop_func = crop_func
+        self.crop_img_dir = crop_img_dir
 
     def __getitem__(self, index: int):
         # get proposals for the index-th image
         proposals = self.proposal_list[index]
-        img = self.loader(proposals.filename)
-
-        # random sample a proposal
         proposal = proposals[random.randint(0, len(proposals)-1)]
-        image_width, image_height = img.width, img.height
-        # proposal_dict = proposal.to_dict()
-        # proposal_dict.update(width=img.width, height=img.height)
+        crop_loaded_flag = False
+        if self.crop_img_dir is not None:
+            pred_id = proposal.pred_ids
+            crop_img_name = os.path.basename(proposals.file_path).split('.')[0] + '_proposal_{}.jpg'.format(pred_id)
+            crop_img_path = os.path.join(self.crop_img_dir, crop_img_name)
+            if os.path.exists(crop_img_path):
+                img = self.loader(crop_img_path)
+                crop_loaded_flag = True
 
-        # crop the proposal from the whole image
-        x1, y1, x2, y2 = proposal.pred_boxes
-        top, left, height, width = int(y1), int(x1), int(y2 - y1), int(x2 - x1)
-        if self.crop_func is not None:
-            top, left, height, width = self.crop_func(img, top, left, height, width)
-        img = crop(img, top, left, height, width)
+        if not crop_loaded_flag:
+            time1 = time.time()
+            img = self.loader(proposals.filename)
+            # small_img_path = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/crop_img.jpg'
+            # img = self.loader(small_img_path)
+
+            time2 = time.time()
+
+            # random sample a proposal
+            
+            image_width, image_height = img.width, img.height
+            # proposal_dict = proposal.to_dict()
+            # proposal_dict.update(width=img.width, height=img.height)
+
+            # crop the proposal from the whole image
+            x1, y1, x2, y2 = proposal.pred_boxes
+            top, left, height, width = int(y1), int(x1), int(y2 - y1), int(x2 - x1)
+            if self.crop_func is not None:
+                top, left, height, width = self.crop_func(img, top, left, height, width)
+            img = crop(img, top, left, height, width)
+            time3 = time.time()
+            # print('proposal dataset time, read img:{:.3f}, crop img:{:.3f}'.format(time2 - time1, time3 - time2))
+
 
         if self.transform is not None:
             img = self.transform(img)

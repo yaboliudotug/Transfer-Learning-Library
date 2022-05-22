@@ -3,10 +3,8 @@ Training a category adaptor
 @author: Junguang Jiang
 @contact: JiangJunguang1123@outlook.com
 """
-from gettext import npgettext
 import random
 import time
-from turtle import ondrag
 import warnings
 import sys
 import argparse
@@ -14,10 +12,6 @@ import os.path as osp
 from collections import deque
 import tqdm
 from typing import List
-
-import prettytable
-
-# from cascade_pre import mprint
 
 import torch
 from torch import Tensor
@@ -29,18 +23,15 @@ from torch.utils.data import DataLoader
 import torchvision.transforms as T
 import torch.nn.functional as F
 from torch.nn.parallel import DistributedDataParallel
-from torch.utils.data.distributed import DistributedSampler
-import torch.distributed as dist
 
 import detectron2.utils.comm as comm
-from detectron2.data.samplers.distributed_sampler import InferenceSampler
 
 sys.path.append('../../../..')
 from tllib.modules.domain_discriminator import DomainDiscriminator
-from tllib.alignment.cdan_cascade import ConditionalDomainAdversarialLoss, ImageClassifier
+from tllib.alignment.cdan import ConditionalDomainAdversarialLoss, ImageClassifier
 from tllib.alignment.d_adapt.proposal import ProposalDataset, flatten, Proposal
 from tllib.utils.data import ForeverDataIterator
-from tllib.utils.metric import accuracy, ConfusionMatrix, compute_confusionmatrix
+from tllib.utils.metric import accuracy, ConfusionMatrix
 from tllib.utils.meter import AverageMeter, ProgressMeter
 from tllib.utils.logger import CompleteLogger
 from tllib.vision.transforms import ResizeImage
@@ -48,6 +39,7 @@ from tllib.vision.transforms import ResizeImage
 import utils
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 class ConfidenceBasedDataSelector:
     """Select data point based on confidence"""
@@ -57,8 +49,6 @@ class ConfidenceBasedDataSelector:
         self.scores = []
         self.category_names = category_names
         self.per_category_thresholds = None
-        print('>>>>>>>>')
-        print('confidence_ratio {}'.format(confidence_ratio))
 
     def extend(self, categories, scores):
         self.categories.extend(categories)
@@ -72,9 +62,8 @@ class ConfidenceBasedDataSelector:
         per_category_thresholds = {}
         print(per_category_scores.keys())
         for c, s in per_category_scores.items():
-            s.sort(reverse=True)    #降序
+            s.sort(reverse=True)
             print(c, len(s), int(self.confidence_ratio * len(s)))
-            # confidence_ratio按照score降序取百分比
             per_category_thresholds[c] = s[int(self.confidence_ratio * len(s))] if len(s) else 1.
 
         print('----------------------------------------------------')
@@ -102,39 +91,32 @@ class RobustCrossEntropyLoss(nn.CrossEntropyLoss):
 
 
 class CategoryAdaptor:
-    def __init__(self, class_names, log, args, distributed=False, num_gpus=1):
+    def __init__(self, class_names, log, args):
         self.class_names = class_names
         for k, v in args._get_kwargs():
             setattr(args, k.rstrip("_c"), v)
         self.args = args
-        # print(self.args)
+        print(self.args)
         self.logger = CompleteLogger(log)
         self.selector = ConfidenceBasedDataSelector(self.args.confidence_ratio, range(len(self.class_names) + 1))
 
         # create model
+        print("=> using model '{}'".format(args.arch))
         backbone = utils.get_model(args.arch, pretrain=not args.scratch)
         pool_layer = nn.Identity() if args.no_pool else None
         num_classes = len(self.class_names) + 1
         self.model = ImageClassifier(backbone, num_classes, bottleneck_dim=args.bottleneck_dim,
                                      pool_layer=pool_layer, finetune=not args.scratch).to(device)
-        self.distributed = distributed
-        self.num_gpus = num_gpus
-        if distributed:
-            self.model = DistributedDataParallel(
-                self.model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True
-            )
 
-    def load_checkpoint(self, name='latest'):
-        if osp.exists(self.logger.get_checkpoint_path(name)):
-            # checkpoint = torch.load(self.logger.get_checkpoint_path(name), map_location='cpu')
-            checkpoint = torch.load(self.logger.get_checkpoint_path(name), map_location='cuda:{}'.format(comm.get_local_rank()))
+    def load_checkpoint(self):
+        if osp.exists(self.logger.get_checkpoint_path('latest')):
+            checkpoint = torch.load(self.logger.get_checkpoint_path('latest'), map_location='cpu')
             self.model.load_state_dict(checkpoint)
             return True
         else:
             return False
 
-    def prepare_training_data(self, proposal_list: List[Proposal], labeled=True, domain_flag='source', 
-                            distributed=False, crop_img_dir=None):
+    def prepare_training_data(self, proposal_list: List[Proposal], labeled=True):
         if not labeled:
             # remove proposals with confidence score between (ignored_scores[0], ignored_scores[1])
             filtered_proposals_list = []
@@ -170,26 +152,12 @@ class CategoryAdaptor:
             normalize
         ])
 
-        dataset = ProposalDataset(filtered_proposals_list, transform, crop_img_dir=crop_img_dir)
-        if distributed:
-            # print('distribute dataset ......')
-            if domain_flag == 'source':
-                self.train_sampler_source = DistributedSampler(dataset, drop_last=True)
-                dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
-                                sampler=self.train_sampler_source, num_workers=self.args.workers, drop_last=True)
-            elif domain_flag == 'target':
-                self.train_sampler_target = DistributedSampler(dataset, drop_last=True)
-                dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
-                                sampler=self.train_sampler_target, num_workers=self.args.workers, drop_last=True)
-        else:
-            dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
+        dataset = ProposalDataset(filtered_proposals_list, transform)
+        dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
                                 shuffle=True, num_workers=self.args.workers, drop_last=True)
-        # print('>>>>> one dataset, dataset_length:{}, batch_size:{}, dataloader_length:{}'.format(
-        #     len(dataset), self.args.batch_size, len(dataloader)
-        # ))
         return dataloader
 
-    def prepare_validation_data(self, proposal_list: List[Proposal], distributed=False, crop_img_dir=None):
+    def prepare_validation_data(self, proposal_list: List[Proposal]):
         """call this function if you have labeled data for validation"""
         normalize = T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         transform = T.Compose([
@@ -205,20 +173,12 @@ class CategoryAdaptor:
             filtered_proposals_list.append(proposals[keep_indices])
 
         filtered_proposals_list = flatten(filtered_proposals_list, self.args.max_val)
-        dataset = ProposalDataset(filtered_proposals_list, transform, crop_img_dir=crop_img_dir)
-        # dataset = ProposalDatasetTest(filtered_proposals_list, transform)   # !!!!!
-        # if distributed:
-        #     sampler = DistributedSampler(dataset, drop_last=False)
-        #     dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
-        #                         sampler=sampler, num_workers=self.args.workers, drop_last=False)
-        # else:
+        dataset = ProposalDataset(filtered_proposals_list, transform)
         dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
-                            shuffle=False, num_workers=self.args.workers, drop_last=False)
-        # print('>>>>> one dataset, dataset_length:{}, batch_size:{}, dataloader_length:{}'.format(
-        #     len(dataset), self.args.batch_size, len(dataloader)))
+                                shuffle=False, num_workers=self.args.workers, drop_last=False)
         return dataloader
 
-    def prepare_test_data(self, proposal_list: List[Proposal], distributed=False, crop_img_dir=None):
+    def prepare_test_data(self, proposal_list: List[Proposal]):
         normalize = T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         transform = T.Compose([
             ResizeImage(self.args.resize_size),
@@ -226,18 +186,12 @@ class CategoryAdaptor:
             normalize
         ])
 
-        dataset = ProposalDataset(proposal_list, transform, crop_img_dir=crop_img_dir)
-        if distributed:
-            # sampler = DistributedSampler(dataset)
-            sampler = InferenceSampler(len(dataset))
-            dataloader = DataLoader(dataset, batch_size=self.args.inference_batch_size,
-                                sampler=sampler, num_workers=self.args.workers)
-        else:
-            dataloader = DataLoader(dataset, batch_size=self.args.inference_batch_size,
-                            shuffle=False, num_workers=self.args.workers, drop_last=False)
+        dataset = ProposalDataset(proposal_list, transform)
+        dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
+                                shuffle=False, num_workers=self.args.workers, drop_last=False)
         return dataloader
 
-    def fit(self, data_loader_source, data_loader_target, data_loader_validation=None, data_loader_test=None, distributed=False, num_gpus=1):
+    def fit(self, data_loader_source, data_loader_target, data_loader_validation=None, distributed=False):
         """When no labels exists on target domain, please set data_loader_validation=None"""
         args = self.args
         if args.seed is not None:
@@ -255,9 +209,8 @@ class CategoryAdaptor:
         iter_source = ForeverDataIterator(data_loader_source)
         iter_target = ForeverDataIterator(data_loader_target)
 
-        # model = self.model.to(device)
-        self.model.to(device)
-        feature_dim = self.model.features_dim
+        model = self.model
+        feature_dim = model.features_dim
         num_classes = len(self.class_names) + 1
 
         if args.randomized:
@@ -265,7 +218,7 @@ class CategoryAdaptor:
         else:
             domain_discri = DomainDiscriminator(feature_dim * num_classes, hidden_size=1024).to(device)
 
-        all_parameters = self.model.get_parameters() + domain_discri.get_parameters()
+        all_parameters = model.get_parameters() + domain_discri.get_parameters()
         # define optimizer and lr scheduler
         optimizer = SGD(all_parameters, args.lr, momentum=args.momentum, weight_decay=args.weight_decay, nesterov=True)
         lr_scheduler = LambdaLR(optimizer, lambda x: args.lr * (1. + args.lr_gamma * float(x)) ** (-args.lr_decay))
@@ -277,47 +230,26 @@ class CategoryAdaptor:
             randomized_dim=args.randomized_dim
         ).to(device)
 
-        print('Category model move to device {} at rank {}'.format(device, comm.get_local_rank()))
-
         if distributed:
-            # self.model = DistributedDataParallel(
-            #     self.model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True
-            # )
+            model = DistributedDataParallel(
+                model, device_ids=[comm.get_local_rank()], broadcast_buffers=False
+            )
             domain_adv = DistributedDataParallel(
-                domain_adv, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True
+                domain_adv, device_ids=[comm.get_local_rank()], broadcast_buffers=False
             )
 
         # start training
-        best_acc1_target = 0.
-        best_acc1_test = 0.
-        best_epoch = 0
+        best_acc1 = 0.
         num_iters_source = len(iter_source)
         num_iters_target = len(iter_target)
-        if comm.is_main_process():
-            print('################# Category Fitting ################')
-            print('Source dataset length: {}'.format(num_iters_source))
-            print('Target dataset lengtht: {}'.format(num_iters_target))
-        if data_loader_validation is not None and comm.is_main_process():
-            print('Validation dataset length: {}'.format(len(data_loader_validation)))
-        if data_loader_test is not None and comm.is_main_process():
-            print('Test dataset length: {}'.format(len(data_loader_test)))
-
-
+        print('>>>>>>>>')
         if args.iters_perepoch_mode == 'compute_from_epoch':
-            args.iters_per_epoch = int(max(num_iters_source, num_iters_target) * args.coefficient)
-        standard_iters_per_epoch_one_gpu = args.iters_per_epoch_standard * 64 // data_loader_source.batch_size
-        if args.iters_per_epoch > standard_iters_per_epoch_one_gpu // num_gpus:
-            args.iters_per_epoch = standard_iters_per_epoch_one_gpu  // num_gpus
-
-        if args.debug:
-            args.epochs = 1
-            args.iters_per_epoch = 21
-
-        if comm.is_main_process():
-            print('Num iters per epoch: {}'.format(args.iters_per_epoch))
+            args.iters_per_epoch = int(max(num_iters_source, num_iters_target) / args.batch_size)
+            args.iters_per_epoch = args.iters_per_epoch * args.coefficient
+        print('num iters per epoch:', args.iters_per_epoch)
 
         for epoch in range(args.epochs):
-            # print("lr:", lr_scheduler.get_last_lr()[0])
+            print("lr:", lr_scheduler.get_last_lr()[0])
             # train for one epoch
             batch_time = AverageMeter('Time', ':3.1f')
             data_time = AverageMeter('Data', ':3.1f')
@@ -332,67 +264,41 @@ class CategoryAdaptor:
                 prefix="Epoch: [{}]".format(epoch))
 
             # switch to train mode
-            self.model.train()
+            model.train()
             domain_adv.train()
 
             end = time.time()
-            print_end = time.time()
-            
-            # print('data_loader_target: {}'.format(len(data_loader_target)))
-            # for i, data in enumerate(data_loader_target):
-            #     x_t, label = data
-            #     x_t = x_t.to(device)
-            #     print('iter: {}. {} {}'.format(i, x_t.shape, x_t.device))
-            
-            if distributed:
-                self.train_sampler_source.set_epoch(epoch)
-                self.train_sampler_target.set_epoch(epoch)
-                if comm.is_main_process():
-                    print('update distribute sampler seed to {}'.format(epoch))
-
             for i in range(args.iters_per_epoch):
                 x_s, labels_s = next(iter_source)
-                x_s = x_s.to(device)
-                y_s, f_s = self.model(x_s)
-
                 x_t, labels_t = next(iter_target)
-                x_t = x_t.to(device)
-                y_t, f_t = self.model(x_t)
+
                 # assign pseudo labels for target-domain proposals with extremely high confidence
-                # 根据提前计算的confidence-ratio计算出的可选择置信度阈值，来选取当前target batch中的可用样本
                 selected = torch.tensor(
                     self.selector.whether_select(
                         labels_t['pred_classes'].numpy().tolist(),
                         labels_t['pred_scores'].numpy().tolist()
                     )
                 )
-                # 将小置信度的样本设置为-1类背景
                 pseudo_classes_t = selected * labels_t['pred_classes'] + (~selected) * -1
                 pseudo_classes_t = pseudo_classes_t.to(device)
 
+                x_s = x_s.to(device)
+                x_t = x_t.to(device)
                 gt_classes_s = labels_s['gt_classes'].to(device)
 
                 # measure data loading time
-                one_data_time = time.time()
-                data_time.update(one_data_time - end)
-                # print('device_time: {:.3f}'.format(one_data_time - end))
+                data_time.update(time.time() - end)
 
                 # compute output
-                # x = torch.cat((x_s, x_t), dim=0)    #此处相当于batchsize变大两倍，可以不cat，使bs与设置保持一直
-                # pre_time = time.time()
-                # print('pre_time: {:.3f}'.format(pre_time - one_data_time ))
-                # y, f = model(x)
-                # model_time = time.time()
-                # print('model_time: {:.3f}'.format(model_time - pre_time))
-                # y_s, y_t = y.chunk(2, dim=0)
-                # f_s, f_t = f.chunk(2, dim=0)
-                # post_time = time.time()
-                # print('post_time: {:.3f}'.format(post_time - model_time))
+                x = torch.cat((x_s, x_t), dim=0)    #此处相当于batchsize变大两倍，可以不cat，使bs与设置保持一直
+                y, f = model(x)
+                y_s, y_t = y.chunk(2, dim=0)
+                f_s, f_t = f.chunk(2, dim=0)
 
                 cls_loss = F.cross_entropy(y_s, gt_classes_s, ignore_index=-1)
                 cls_loss_t = RobustCrossEntropyLoss(ignore_index=-1, offset=args.epsilon)(y_t, pseudo_classes_t)
-                transfer_loss, domain_acc = domain_adv(y_s, f_s, y_t, f_t)
-                # domain_acc = domain_adv.domain_discriminator_accuracy
+                transfer_loss = domain_adv(y_s, f_s, y_t, f_t)
+                domain_acc = domain_adv.domain_discriminator_accuracy
                 loss = cls_loss + transfer_loss * args.trade_off + cls_loss_t
 
                 cls_acc = accuracy(y_s, gt_classes_s)[0]
@@ -413,126 +319,36 @@ class CategoryAdaptor:
                 batch_time.update(time.time() - end)
                 end = time.time()
 
-                # if distributed:
-                #     dist.barrier()
-
-                if i % args.print_freq == 0 and i != 0 and comm.is_main_process():
+                if i % args.print_freq == 0:
                     progress.display(i)
-                    print_time = time.time() - print_end
-                    current_time = time.strftime('%m-%d %H:%M:%S',time.localtime(time.time()))
-                    print('{} Print time per {} iter: {:.3f} Seconds  |  Estimated complete time: {:.1f} Mins\n'.format(
-                        current_time, args.print_freq, print_time, print_time / args.print_freq * args.iters_per_epoch / 60))
-                    print_end = time.time()
 
-            if distributed:
-                dist.barrier()
             # evaluate on validation set
-            if comm.is_main_process() and epoch > 3 and (epoch + 1) % args.eval_freq == 0:
-                if data_loader_validation is not None:
-                    print('************ Category Validation validating ************')
-                    acc1 = self.validate(data_loader_validation, self.model, self.class_names, args)
-                    if acc1 > best_acc1_target:
-                    # if comm.is_main_process():
-                        torch.save(self.model.state_dict(), self.logger.get_checkpoint_path('best_target'))
-                        print('best acc at epoch {} update to {}'.format(epoch, acc1))
-                        best_epoch = epoch
-                        best_acc1_target = acc1
-                # if data_loader_test is not None:
-                #     print('************ Category Test validating ************')
-                #     acc1 = self.validate(data_loader_test, self.model, self.class_names, args)
-                #     if acc1 > best_acc1_test:
-                #     # if comm.is_main_process():
-                #         torch.save(self.model.state_dict(), self.logger.get_checkpoint_path('best_test'))
-                #         print('best acc at epoch {} update to {}'.format(epoch, acc1))
-                #         best_epoch = epoch
-                #         best_acc1_test = acc1
-            if distributed:
-                dist.barrier()    
+            if data_loader_validation is not None:
+                acc1 = self.validate(data_loader_validation, model, self.class_names, args)
+                best_acc1 = max(acc1, best_acc1)
 
             # save checkpoint
-            if comm.is_main_process():
-                torch.save(self.model.state_dict(), self.logger.get_checkpoint_path('latest'))
+            torch.save(model.state_dict(), self.logger.get_checkpoint_path('latest'))
 
-        if comm.is_main_process():
-            print("best_acc1 = {:3.1f} ad epoch {}".format(best_acc1_target, best_epoch))
-            # print("best_acc1_test = {:3.1f} ad epoch {}".format(best_acc1_test, best_epoch))
-        # model.to(torch.device("cpu"))
+        print("best_acc1 = {:3.1f}".format(best_acc1))
         domain_adv.to(torch.device("cpu"))
         self.logger.logger.flush()
 
-    def predict(self, data_loader, distributed=False, debug=False):
-        # if distributed:
-        #     self.model = DistributedDataParallel(
-        #         self.model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True
-        #     )
+    def predict(self, data_loader):
         # switch to evaluate mode
-        # self.model.cuda()
         self.model.eval()
         predictions = deque()
-        predictions_rank = []
-        file_names_rank = []
-        file_names = []
-        # print(self.model.device)
-        if comm.is_main_process():
-            print('************ Category Predicting ************')
+
         with torch.no_grad():
-            end_time = time.time()
-            # for images, _ in tqdm.tqdm(data_loader):
-            for i, one_data in enumerate(data_loader):
-                start_time = time.time()
-                images, meta_data = one_data
-                data_time = time.time()
-                # print('>>>>>>>>')
-                # print('data time: {:.3f}'.format(data_time- start_time))
+            for images, _ in tqdm.tqdm(data_loader):
                 images = images.to(device)
-                file_names_rank.extend(meta_data['image_id'])
-                
-                device_time = time.time()
-                # print('device_time: {:.3f}'.format(device_time- data_time))
+
                 # compute output
                 output = self.model(images)
-                model_time = time.time()
-                # print('model_time: {:.3f}'.format(model_time - device_time))
                 prediction = output.argmax(-1).cpu().numpy().tolist()
-                # print(images.shape, images.device, (next(self.model.parameters()).device))
-
                 for p in prediction:
-                    predictions_rank.append(p)
-                    # print(len(predictions_rank))
-
-                if  i % self.args.print_freq == 0 and i != 0 and comm.is_main_process():
-                    print_time = time.time() - end_time
-                    current_time = time.strftime('%m-%d %H:%M:%S',time.localtime(time.time()))
-                    print('{} Print time per {} {}/{} iter: {:.3f} Seconds  |  Estimated complete time: {:.1f} Mins device:{} len(predictions_rank):{}'.format(
-                        current_time, self.args.print_freq, i, len(data_loader), print_time,
-                        print_time / self.args.print_freq * len(data_loader) / 60, images.device, len(predictions_rank)))
-                    end_time = time.time()
-
-                # for p in prediction:
-                #     predictions.append(p)
-                # post_time = time.time()
-                # print('post_time: {:.3f}'.format(post_time - model_time))
-                # end_time = time.time()
-        predictions_all_rank = comm.all_gather(predictions_rank)
-        file_names = comm.all_gather(file_names_rank)
-        predictions_res = []
-        for one in predictions_all_rank:
-            for p in one:
-                predictions_res.append(p)
-
-        names_res = []
-        for one in file_names:
-            for p in one:
-                names_res.append(p)
-        # print('------')
-        # print(len(file_names_rank))
-        # print(len(file_names))
-        # print(len(names_res))
-        # print(names_res)
-        for p in predictions_res:
-            predictions.append(p)
-
-        return predictions, names_res
+                    predictions.append(p)
+        return predictions
 
     @staticmethod
     def validate(val_loader, model, class_names, args) -> float:
@@ -547,17 +363,6 @@ class CategoryAdaptor:
         # switch to evaluate mode
         model.eval()
         confmat = ConfusionMatrix(len(class_names)+1)
-        pred_class_dict = {}
-        gt_dict = {}
-        pred_score_dict = {}
-        for class_name in class_names + ['bg']:
-            pred_score_dict[class_name] = []
-            pred_class_dict[class_name] = []
-            gt_dict[class_name] = []
-
-        pred_class_ls = []
-        gt_ls = []
-        pred_score_ls = []
 
         with torch.no_grad():
             end = time.time()
@@ -575,38 +380,15 @@ class CategoryAdaptor:
                 losses.update(loss.item(), images.size(0))
                 top1.update(acc1.item(), images.size(0))
 
-                gt_ls.extend(gt_classes.to(torch.device("cpu")).numpy())
-                pred_class_ls.extend(output.cpu().argmax(1).numpy())
-                pred_score_ls.extend(output.cpu().max(1)[0].numpy())
-
                 # measure elapsed time
                 batch_time.update(time.time() - end)
                 end = time.time()
 
-                if i % args.print_freq == 0 and comm.is_main_process():
+                if i % args.print_freq == 0:
                     progress.display(i)
-            if comm.is_main_process():
-                print(' * Acc@1 {top1.avg:.3f}'.format(top1=top1))
-                print(confmat.format(class_names+["bg"]))
 
-            score_thresholds=[0, 0.6, 0.9, 0.95, 0.97, 0.98, 0.99]
-            confusion_res = compute_confusionmatrix(gt_ls, pred_class_ls, pred_score_ls, \
-                class_names+['bg'], score_thresholds=score_thresholds)
-            table = prettytable.PrettyTable()
-            table.add_column('class', class_names + ['bg'])
-            for score_threshold in score_thresholds:
-                one_confusion_res = confusion_res[str(score_threshold)]
-                acc = one_confusion_res['acc']
-                recall = one_confusion_res['recall']
-                # print("PR result at score_threshold {}".format(score_threshold))
-                # table = prettytable.PrettyTable(["class", "acc", "recall"])
-                write_column_name = 's_{} P/R'.format(score_threshold)
-                write_column = []
-                for i, per_class, per_acc, per_recall in zip(range(len(class_names+['bg'])), class_names+['bg'], (acc * 100).tolist(), (recall * 100).tolist()):
-                    write_column += ['{:.1f}  {:.1f}'.format(per_acc, per_recall)]
-                table.add_column(write_column_name, write_column)
-            if comm.is_main_process():
-                print(table.get_string())
+            print(' * Acc@1 {top1.avg:.3f}'.format(top1=top1))
+            print(confmat.format(class_names+["bg"]))
 
         return top1.avg
 
@@ -627,14 +409,6 @@ class CategoryAdaptor:
                             help='backbone architecture: ' +
                                  ' | '.join(utils.get_model_names()) +
                                  ' (default: resnet101)')
-        # parser.add_argument('--arch-c', metavar='ARCH', default='resnet50',
-        #                     choices=utils.get_model_names(),
-        #                     help='backbone architecture: ' +
-        #                          ' | '.join(utils.get_model_names()) +
-        #                          ' (default: resnet101)')
-        parser.add_argument('--debug', action='store_true',
-                            help='debug.')
-
         parser.add_argument('--bottleneck-dim-c', default=1024, type=int,
                             help='Dimension of bottleneck')
         parser.add_argument('--no-pool-c', action='store_true',
@@ -651,13 +425,9 @@ class CategoryAdaptor:
         parser.add_argument('--epsilon-c', default=0.01, type=float,
                             help='epsilon hyper-parameter in Robust Cross Entropy')
         # training parameters
-        parser.add_argument('--batch-size-c', default=64, type=int,
+        parser.add_argument('--batch-size-c', default=96, type=int,
                             metavar='N',
-                            help='mini-batch size (default: 64)')   #96
-        parser.add_argument('--inference-batch-size-c', default=64, type=int,
-                            metavar='N',
-                            help='mini-batch size (default: 64)')   #96
-
+                            help='mini-batch size (default: 64)')   
                             # 64，实际预测时，会把source和target cat到一起，batch_size会变成2倍
         parser.add_argument('--learning-rate-c', default=0.01, type=float,
                             metavar='LR', help='initial learning rate', dest='lr')
@@ -667,19 +437,17 @@ class CategoryAdaptor:
         parser.add_argument('--weight-decay-c', default=1e-3, type=float,
                             metavar='W', help='weight decay (default: 1e-3)',
                             dest='weight_decay')
-        parser.add_argument('--workers-c', default=4, type=int, metavar='N',
+        parser.add_argument('--workers-c', default=2, type=int, metavar='N',
                             help='number of data loading workers (default: 2)')
-        parser.add_argument('--epochs-c', default=8, type=int, metavar='N',
+        parser.add_argument('--epochs-c', default=10, type=int, metavar='N',
                             help='number of total epochs to run')   # 10
-        parser.add_argument('--iters-per-epoch-standard-c', default=1000, type=int,
+        parser.add_argument('--iters-per-epoch-c', default=1000, type=int,
                             help='Number of iterations per epoch')
         parser.add_argument('--iters-perepoch-mode', default='compute_from_epoch', type=str,
                             help='iters-perepoch-mode')    
-        parser.add_argument('--coefficient', default=1, type=int,
+        parser.add_argument('--coefficient', default=5, type=int,
                             help='iters-perepoch-mode coefficient')                   
-        parser.add_argument('--print-freq-c', default=10, type=int,
-                            metavar='N', help='print frequency (default: 100)')
-        parser.add_argument('--eval-freq-c', default=1, type=int,
+        parser.add_argument('--print-freq-c', default=100, type=int,
                             metavar='N', help='print frequency (default: 100)')
         parser.add_argument('--seed-c', default=None, type=int,
                             help='seed for initializing training. ')

@@ -504,7 +504,7 @@ class BoundingBoxAdaptor:
         parser.add_argument('--trade-off', default=0.1, type=float,
                             help='the trade-off hyper-parameter for transfer loss')
         # training parameters
-        parser.add_argument('--batch-size-b', default=64, type=int,
+        parser.add_argument('--batch-size-b', default=32, type=int,
                             metavar='N',
                             help='mini-batch size (default: 64)') # 32
         parser.add_argument('--lr-b', default=0.004, type=float,

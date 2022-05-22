@@ -3,7 +3,6 @@
 @author: Junguang Jiang
 @contact: JiangJunguang1123@outlook.com
 """
-from distutils.log import debug
 import logging
 from operator import mod
 import os
@@ -80,70 +79,43 @@ def generate_proposals(model, num_classes, dataset_names, cache_root, cfg):
     return fg_proposals_list, bg_proposals_list
 
 
-def analyze_proposal(proposal_list, class_names, show_save_dir, crop_save_dir, show_scale=0.5, show_flag=False, crop_flag=False):
-    # if show_flag:
-    #     if os.path.exists(show_save_dir):
-    #         shutil.rmtree(show_save_dir)
-    #     os.makedirs(show_save_dir, exist_ok=True)
-    # if crop_flag:
-    #     if os.path.exists(crop_save_dir):
-    #         shutil.rmtree(crop_save_dir)
-    #     os.makedirs(crop_save_dir, exist_ok=True)
-
-    # if os.path.exists(show_save_dir):
-    #     show_flag = False
-    # if os.path.exists(crop_save_dir):
-    #     crop_flag = False
-    # if not show_flag and not crop_flag:
-    #     return
-
-    os.makedirs(show_save_dir, exist_ok=True)
-    os.makedirs(crop_save_dir, exist_ok=True)
-
+def show_gt_pred(proposal_list, class_names, save_dir, scale=0.5):
+    if os.path.exists(save_dir):
+        return
+    if os.path.exists(save_dir):
+        shutil.rmtree(save_dir)
+    os.makedirs(save_dir, exist_ok=True)
+    print(save_dir)
     palette = {'red': (0, 0, 255), 'green': (0, 255, 0), 'blue': (255, 0, 0)}
     class_names = class_names + ['bg']
     img_height, img_width = 0, 0
     for proposals in tqdm.tqdm(proposal_list):
         file_path = proposals.filename
-        img_np_show = cv2.imread(file_path)
-        img_np_clean = img_np_show.copy()
+        gt_classes, gt_bboxes = proposals.all_gt_classes, proposals.all_gt_boxes
+        img_np = cv2.imread(file_path)
+        img_height = img_np.shape[0]
+        img_width = img_np.shape[1]
+        for idx in range(len(gt_classes)):
+            class_id, bbox = gt_classes[idx], gt_bboxes[idx]
+            bbox = [int(i) for i in bbox]
+            class_name = class_names[class_id]
+            cv2.rectangle(img_np, (bbox[0], bbox[1]), (bbox[2], bbox[3]), palette['blue'], 2) 
+            cv2.putText(img_np, '{}'.format(class_name), (bbox[2] + 2, bbox[1] + 2), cv2.FONT_HERSHEY_COMPLEX,
+                            0.7, palette['blue'], 1)
         for idx in range(len(proposals.pred_classes)):
-            pred_box = proposals.pred_boxes[idx]
-            pred_class = proposals.pred_classes[idx]
-            pred_score = proposals.pred_scores[idx]
-            pred_id = int(proposals.pred_ids[idx])
+            pred_box=proposals.pred_boxes[idx]
+            pred_class=proposals.pred_classes[idx]
+            pred_score=proposals.pred_scores[idx]
             pred_class_name = class_names[pred_class]
-            pred_box = [int(i) for i in pred_box]   # x1 y1 x2 y2
-            
-            if crop_flag:
-                try:
-                    crop_img = img_np_clean[pred_box[1]: pred_box[3], pred_box[0]: pred_box[2]]
-                    crop_name = os.path.basename(file_path).split('.')[0] + '_proposal_{}.jpg'.format(pred_id)
-                    # print(pred_box, img_np_clean.shape, crop_name)
-                    cv2.imwrite(os.path.join(crop_save_dir, crop_name), crop_img)
-                except:
-                    print(pred_box, img_np_clean.shape, crop_name)
-                    pass
-            if show_flag:
-                cv2.rectangle(img_np_show, (pred_box[0], pred_box[1]), (pred_box[2], pred_box[3]), palette['red'], 2) 
-                cv2.putText(img_np_show, '{}_{:.2f}'.format(pred_class_name, pred_score), (pred_box[2] + 2, pred_box[1] + 2), cv2.FONT_HERSHEY_COMPLEX,
-                                0.7, palette['red'], 1)
+            pred_box = [int(i) for i in pred_box]
+            cv2.rectangle(img_np, (pred_box[0], pred_box[1]), (pred_box[2], pred_box[3]), palette['red'], 2) 
+            cv2.putText(img_np, '{}_{:.2f}'.format(pred_class_name, pred_score), (pred_box[2] + 2, pred_box[1] + 2), cv2.FONT_HERSHEY_COMPLEX,
+                            0.7, palette['red'], 1)
+    
+        img_np = cv2.resize(img_np, (int(img_width * scale), int(img_height * scale)))
+        cv2.imwrite(os.path.join(save_dir, os.path.basename(file_path)), img_np)
 
-        if show_flag:
-            gt_classes, gt_bboxes = proposals.all_gt_classes, proposals.all_gt_boxes
-            for idx in range(len(gt_classes)):
-                class_id, bbox = gt_classes[idx], gt_bboxes[idx]
-                bbox = [int(i) for i in bbox]
-                class_name = class_names[class_id]
-                cv2.rectangle(img_np_show, (bbox[0], bbox[1]), (bbox[2], bbox[3]), palette['blue'], 2) 
-                cv2.putText(img_np_show, '{}'.format(class_name), (bbox[2] + 2, bbox[1] + 2), cv2.FONT_HERSHEY_COMPLEX,
-                                0.7, palette['blue'], 1)
-            
-            img_height, img_width = img_np_show.shape[:2]
-            img_np_show = cv2.resize(img_np_show, (int(img_width * show_scale), int(img_height * show_scale)))
-            cv2.imwrite(os.path.join(show_save_dir, os.path.basename(file_path)), img_np_show)
-
-def generate_category_labels(prop, category_adaptor, cache_filename, debug=False, distributed=False, crop_img_dir=None):
+def generate_category_labels(prop, category_adaptor, cache_filename, debug=False, distributed=False):
     """Generate category labels for each proposals in `prop` and save them to the disk"""
     prop_w_category = PersistentProposalList(cache_filename)
     # if not prop_w_category.load():
@@ -160,14 +132,12 @@ def generate_category_labels(prop, category_adaptor, cache_filename, debug=False
         for p in flatten(prop_w_category):
             class_ls.append(os.path.basename(p.filename))
 
-        data_loader_test = category_adaptor.prepare_test_data(flatten(prop_w_category), distributed, crop_img_dir=crop_img_dir)
+        data_loader_test = category_adaptor.prepare_test_data(flatten(prop_w_category), distributed)
         predictions, names_res = category_adaptor.predict(data_loader_test, distributed)
         for p in prop_w_category:
             p.pred_classes = np.array([predictions.popleft() for _ in range(len(p))])
         if comm.is_main_process():
             prop_w_category.flush()
-        if distributed:
-            dist.barrier()
     return prop_w_category
 
 
@@ -252,7 +222,6 @@ def train(model, logger, cfg, args, args_cls, args_box):
     cache_proposal_root = os.path.join(cfg.OUTPUT_DIR, "cache", "proposal")
     prop_t_fg, prop_t_bg = generate_proposals(model, len(classes), args.targets, cache_proposal_root, cfg)
     prop_s_fg, prop_s_bg = generate_proposals(model, len(classes), args.sources, cache_proposal_root, cfg)
-    
     # prop_test_fg, prop_test_bg = generate_proposals(model, len(classes), args.test, cache_proposal_root, cfg)
     
     model.to(torch.device('cpu'))
@@ -263,21 +232,11 @@ def train(model, logger, cfg, args, args_cls, args_box):
     #     prop_s_fg, prop_s_bg = prop_s_fg[:source_num], prop_s_bg[:source_num]
     #     prop_t_fg, prop_t_bg = prop_t_fg[:target_num], prop_t_bg[:target_num]
 
-    
-    show_flag = False
-    crop_flag = True
-    gt_pred_show_root = os.path.join(cfg.OUTPUT_DIR, "cache", "show_gt_pred")
-    crop_proposal_save_root = os.path.join(cfg.OUTPUT_DIR, "cache", "crop_propals")
-    source_crop_proposal_save_root = os.path.join(crop_proposal_save_root, 'source')
-    target_crop_proposal_save_root = os.path.join(crop_proposal_save_root, 'target')
-
-    # if comm.is_main_process():  # 
-    #     analyze_proposal(prop_s_fg + prop_s_bg, classes, show_save_dir=os.path.join(gt_pred_show_root, 'source'), 
-    #                     crop_save_dir=source_crop_proposal_save_root, show_scale=0.6, show_flag=show_flag, crop_flag=crop_flag) 
-    #     analyze_proposal(prop_t_fg + prop_t_bg, classes, show_save_dir=os.path.join(gt_pred_show_root, 'target'), 
-    #                     crop_save_dir=target_crop_proposal_save_root, show_scale=0.6, show_flag=show_flag, crop_flag=crop_flag)
-    if distributed:
-        dist.barrier()
+    if args.show_gt == 'show_gt' and comm.is_main_process():
+        gt_pred_show_root = os.path.join(cfg.OUTPUT_DIR, "cache", "show_gt_pred")
+        show_gt_pred(prop_s_fg, classes, os.path.join(gt_pred_show_root, 'source'), scale=0.6) 
+        show_gt_pred(prop_t_fg, classes, os.path.join(gt_pred_show_root, 'target'), scale=0.6)
+        # show_gt_pred(prop_test_fg, classes, os.path.join(gt_pred_show_root, 'test'), scale=0.6) 
 
     # train the category adaptor
     for cascade_id in range(1, args.num_cascade + 1):
@@ -285,70 +244,60 @@ def train(model, logger, cfg, args, args_cls, args_box):
             print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
             print('>>>>>>>>>>> Cascade Phase {} >>>>>>>>>>>'.format(cascade_id))
             print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
-
-
-
-
-
         category_adaptor = category_adaptation_new1.CategoryAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "cls_{}".format(cascade_id)), args_cls)
         # if not category_adaptor.load_checkpoint():
         if True:
-            data_loader_source = category_adaptor.prepare_training_data(prop_s_fg + prop_s_bg, True, domain_flag='source', 
-                                                                        distributed=distributed, crop_img_dir=source_crop_proposal_save_root)
-            data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False, domain_flag='target', 
-                                                                        distributed=distributed, crop_img_dir=target_crop_proposal_save_root)
-            data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg, crop_img_dir=target_crop_proposal_save_root)
+            data_loader_source = category_adaptor.prepare_training_data(prop_s_fg + prop_s_bg, True, domain_flag='source', distributed=distributed)
+            data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False, domain_flag='target', distributed=distributed)
+            data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg)
             # data_loader_test = category_adaptor.prepare_validation_data(prop_test_fg + prop_test_bg)
             # 使用source domain的proposal进行训练，而不仅仅是gt，因为gt数量过少，且不具有roi的特征代表性
-            # category_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, distributed=distributed, num_gpus=num_gpus)
+            category_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, distributed=distributed, num_gpus=num_gpus)
             
-            category_adaptor.fit(data_loader_source, data_loader_target, distributed=distributed, num_gpus=num_gpus)
+            # category_adaptor.fit(data_loader_source, data_loader_target, distributed=distributed, num_gpus=num_gpus)
+
         
         if args.use_best_category is not None:
             if comm.is_main_process():
                 print('loading best category adaptor......')
             category_adaptor.load_checkpoint(name=args.use_best_category)
+        # category_adaptor.model.cuda()
+
+
         # generate category labels for each proposals
         cache_feedback_root = os.path.join(cfg.OUTPUT_DIR, "cache", "feedback")
         prop_t_fg = generate_category_labels(
-            prop_t_fg, category_adaptor, os.path.join(cache_feedback_root, "{}_fg_{}.json".format(args.targets[0], cascade_id)), 
-            debug=args.debug, distributed=distributed, crop_img_dir=target_crop_proposal_save_root
+            prop_t_fg, category_adaptor, os.path.join(cache_feedback_root, "{}_fg_{}.json".format(args.targets[0], cascade_id)), debug=args.debug, distributed=distributed
         )
         prop_t_bg = generate_category_labels(
-            prop_t_bg, category_adaptor, os.path.join(cache_feedback_root, "{}_bg_{}.json".format(args.targets[0], cascade_id)), 
-            debug=args.debug, distributed=distributed, crop_img_dir=target_crop_proposal_save_root
+            prop_t_bg, category_adaptor, os.path.join(cache_feedback_root, "{}_bg_{}.json".format(args.targets[0], cascade_id)), debug=args.debug, distributed=distributed
         )
         # 在此加入两个数据集的评估结果
         category_adaptor.model.to(torch.device("cpu"))
+        category_adaptor.model.to(torch.device("cpu"))
 
-
-
-
-
-
-
+    # for bbox_adaptor_id in range(1, args.num_category_cascade + 1):
+        # train the bbox adaptor
         bbox_adaptor = bbox_adaptation_new1.BoundingBoxAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "bbox_{}".format(cascade_id)), args_box)
         # if not bbox_adaptor.load_checkpoint():
         if True:
             data_loader_source = bbox_adaptor.prepare_training_data(prop_s_fg, True, domain_flag='source', distributed=distributed)
             data_loader_target = bbox_adaptor.prepare_training_data(prop_t_fg, False, domain_flag='source', distributed=distributed)
             data_loader_validation = bbox_adaptor.prepare_validation_data(prop_t_fg)
-            # if comm.is_main_process():
-            #     bbox_adaptor.validate_baseline(data_loader_validation)
+            # data_loader_test = bbox_adaptor.prepare_validation_data(prop_test_fg)
+            if comm.is_main_process():
+                bbox_adaptor.validate_baseline(data_loader_validation)
             if distributed:
                 dist.barrier()
-            print('>>>>>>>>> debug', args.debug)
-            bbox_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, distributed=distributed, num_gpus=num_gpus, debug=args.debug)
-            if distributed:
-                dist.barrier()
+            bbox_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, distributed=distributed, num_gpus=num_gpus)
+
         # generate bounding box labels for each proposals
         cache_feedback_root = os.path.join(cfg.OUTPUT_DIR, "cache", "feedback_bbox")
         if args.use_best_bbox is not None:
-            if comm.is_main_process():
-                print('loading best bbox adaptor...')
+            print('loading best bbox adaptor...')
             bbox_adaptor.load_checkpoint(name=args.use_best_bbox)
-            # bbox_adaptor.model.cuda()
-            # print('loading done.')
+            bbox_adaptor.model.cuda()
+            print('loading done.')
         prop_t_fg_refined = generate_bounding_box_labels(
             prop_t_fg, bbox_adaptor, classes,
             os.path.join(cache_feedback_root, "{}_fg_{}.json".format(args.targets[0], cascade_id))
@@ -462,8 +411,7 @@ def main(args, args_cls, args_box):
     # print('done')
     # print((next(model.parameters()).device))
     # time.sleep(10)
-
-    # args.debug = True
+    args.debug = True
 
     train(model, logger, cfg, args, args_cls, args_box)
 
