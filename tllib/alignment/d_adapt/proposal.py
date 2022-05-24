@@ -196,6 +196,8 @@ class ProposalGenerator(DatasetEvaluator):
         input_instance = inputs[0]['instances'].to(cpu_device)
         output_instance = outputs[0][type].to(cpu_device)
         filename = inputs[0]['file_name']
+        height = inputs[0]['height']
+        width = inputs[0]['width']
         pred_boxes = output_instance.pred_boxes
         pred_scores = output_instance.scores
         pred_classes = output_instance.pred_classes
@@ -207,6 +209,8 @@ class ProposalGenerator(DatasetEvaluator):
             pred_boxes=pred_boxes.tensor.numpy(),
             pred_classes=pred_classes.numpy(),
             pred_scores=pred_scores.numpy(),
+            height = height,
+            width = width
         )
 
         if hasattr(input_instance, 'gt_boxes'):
@@ -234,10 +238,10 @@ class ProposalGenerator(DatasetEvaluator):
                 proposal.all_gt_classes = input_instance.gt_classes.numpy()
                 proposal.all_gt_boxes = input_instance.gt_boxes.tensor.numpy()
         if pred_boxes.tensor.shape[0] == 0:
-            proposal.pred_ids = []
+            proposal.pred_ids = np.array([])
         else:
-            pred_ids = list(range(pred_boxes.tensor.shape[0]))
-            proposal.pred_ids = pred_ids
+            one_pred_ids = np.array(list(range(pred_boxes.tensor.shape[0])))
+            proposal.pred_ids = one_pred_ids
 
         return proposal
 
@@ -266,7 +270,8 @@ class Proposal:
 
     """
     def __init__(self, image_id, filename, pred_boxes, pred_classes, pred_scores,
-                 gt_classes=None, gt_boxes=None, gt_ious=None, gt_fg_classes=None, all_gt_classes=None, all_gt_boxes=None, pred_ids=None):
+                 gt_classes=None, gt_boxes=None, gt_ious=None, gt_fg_classes=None, 
+                 all_gt_classes=None, all_gt_boxes=None, pred_ids=None, height=None, width=None):
         self.image_id = image_id
         self.filename = filename
         self.pred_boxes = pred_boxes
@@ -279,6 +284,8 @@ class Proposal:
         self.all_gt_classes = all_gt_classes
         self.all_gt_boxes = all_gt_boxes
         self.pred_ids = pred_ids
+        self.height = height
+        self.width = width
 
     def to_dict(self):
         return {
@@ -294,7 +301,9 @@ class Proposal:
             "gt_fg_classes": self.gt_fg_classes.tolist(),
             "all_gt_boxes": self.all_gt_boxes.tolist(),
             "all_gt_classes": self.all_gt_classes.tolist(),
-            "pred_ids": self.pred_ids
+            "pred_ids": self.pred_ids.tolist(),
+            "height": self.height,
+            "width": self.width
         }
 
     def __str__(self):
@@ -318,7 +327,9 @@ class Proposal:
             gt_fg_classes=self.gt_fg_classes[item],
             all_gt_boxes=self.all_gt_boxes,
             all_gt_classes=self.all_gt_classes,
-            pred_ids=self.pred_ids[item]
+            pred_ids=self.pred_ids[item],
+            height=self.height,
+            width=self.width
         )
 
 
@@ -347,7 +358,9 @@ def asProposal(dict):
             np.array(dict["gt_fg_classes"]),
             np.array(dict["all_gt_classes"]),
             np.array(dict["all_gt_boxes"]),
-            np.array(dict["pred_ids"])
+            pred_ids=np.array(dict["pred_ids"]),
+            height=dict["height"],
+            width=dict["width"],
         )
     return dict
 
@@ -384,7 +397,7 @@ class PersistentProposalList(list):
         """
         os.makedirs(os.path.dirname(self.filename), exist_ok=True)
         with open(self.filename, "w") as f:
-            json.dump(self, f, cls=ProposalEncoder)
+            json.dump(self, f, cls=ProposalEncoder, indent=4)
         print("Write to cache: {}".format(self.filename))
 
 
@@ -424,18 +437,31 @@ class ProposalDataset(datasets.VisionDataset):
     def __getitem__(self, index: int):
         # get proposals for the index-th image
         proposals = self.proposal_list[index]
+        # print(len(proposals))
         proposal = proposals[random.randint(0, len(proposals)-1)]
+        # print(proposal)
         crop_loaded_flag = False
+        image_width, image_height = int(proposal.width), int(proposal.height)
+        time1 = time.time()
+        time_start_read = time.time()
+        read_mode = ''
+        test_dir = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_adapt/test_imgs'
+
+
         if self.crop_img_dir is not None:
             pred_id = proposal.pred_ids
-            crop_img_name = os.path.basename(proposals.file_path).split('.')[0] + '_proposal_{}.jpg'.format(pred_id)
+            crop_img_name = os.path.basename(proposals.filename).split('.')[0] + '_proposal_{}.jpg'.format(pred_id)
             crop_img_path = os.path.join(self.crop_img_dir, crop_img_name)
             if os.path.exists(crop_img_path):
                 img = self.loader(crop_img_path)
                 crop_loaded_flag = True
+            read_mode = 'crop'
+            # print('>>>>>>>>>>')
+            # print(crop_img_path)
+            # img.save(os.path.join(test_dir, crop_img_name.split('.jpg')[0] + '_crop.jpg'))
 
         if not crop_loaded_flag:
-            time1 = time.time()
+        # if True:
             img = self.loader(proposals.filename)
             # small_img_path = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/crop_img.jpg'
             # img = self.loader(small_img_path)
@@ -455,7 +481,13 @@ class ProposalDataset(datasets.VisionDataset):
                 top, left, height, width = self.crop_func(img, top, left, height, width)
             img = crop(img, top, left, height, width)
             time3 = time.time()
+            read_mode = 'whole'
+            # img.save(os.path.join(test_dir, crop_img_name.split('.jpg')[0] + '_whole.jpg'))
             # print('proposal dataset time, read img:{:.3f}, crop img:{:.3f}'.format(time2 - time1, time3 - time2))
+        time_end_read = time.time()
+        # print('proposal dataset time, read img:{:.3f}, read_mode:{}'.format(time_end_read - time_start_read, read_mode))
+
+        
 
 
         if self.transform is not None:

@@ -8,6 +8,7 @@ import logging
 from operator import mod
 import os
 import argparse
+from pickle import NONE
 import shutil
 from statistics import mode
 import sys
@@ -90,12 +91,12 @@ def analyze_proposal(proposal_list, class_names, show_save_dir, crop_save_dir, s
     #         shutil.rmtree(crop_save_dir)
     #     os.makedirs(crop_save_dir, exist_ok=True)
 
-    # if os.path.exists(show_save_dir):
-    #     show_flag = False
-    # if os.path.exists(crop_save_dir):
-    #     crop_flag = False
-    # if not show_flag and not crop_flag:
-    #     return
+    if os.path.exists(show_save_dir):
+        show_flag = False
+    if os.path.exists(crop_save_dir):
+        crop_flag = False
+    if not show_flag and not crop_flag:
+        return
 
     os.makedirs(show_save_dir, exist_ok=True)
     os.makedirs(crop_save_dir, exist_ok=True)
@@ -171,7 +172,7 @@ def generate_category_labels(prop, category_adaptor, cache_filename, debug=False
     return prop_w_category
 
 
-def generate_bounding_box_labels(prop, bbox_adaptor, class_names, cache_filename):
+def generate_bounding_box_labels(prop, bbox_adaptor, class_names, cache_filename, crop_img_dir=None):
     """Generate bounding box labels for each proposals in `prop` and save them to the disk"""
     prop_w_bbox = PersistentProposalList(cache_filename)
     # if not prop_w_bbox.load():
@@ -181,7 +182,7 @@ def generate_bounding_box_labels(prop, bbox_adaptor, class_names, cache_filename
             keep_indices = (0 <= p.pred_classes) & (p.pred_classes < len(class_names))
             prop_w_bbox.append(p[keep_indices])
 
-        data_loader_test = bbox_adaptor.prepare_test_data(flatten(prop_w_bbox))
+        data_loader_test = bbox_adaptor.prepare_test_data(flatten(prop_w_bbox), crop_img_dir=crop_img_dir)
         predictions = bbox_adaptor.predict(data_loader_test)
         for p in prop_w_bbox:
             p.pred_boxes = np.array([predictions.popleft() for _ in range(len(p))])
@@ -270,6 +271,8 @@ def train(model, logger, cfg, args, args_cls, args_box):
     crop_proposal_save_root = os.path.join(cfg.OUTPUT_DIR, "cache", "crop_propals")
     source_crop_proposal_save_root = os.path.join(crop_proposal_save_root, 'source')
     target_crop_proposal_save_root = os.path.join(crop_proposal_save_root, 'target')
+    source_crop_proposal_save_root = None
+    target_crop_proposal_save_root = None
 
     # if comm.is_main_process():  # 
     #     analyze_proposal(prop_s_fg + prop_s_bg, classes, show_save_dir=os.path.join(gt_pred_show_root, 'source'), 
@@ -298,11 +301,9 @@ def train(model, logger, cfg, args, args_cls, args_box):
             data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False, domain_flag='target', 
                                                                         distributed=distributed, crop_img_dir=target_crop_proposal_save_root)
             data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg, crop_img_dir=target_crop_proposal_save_root)
-            # data_loader_test = category_adaptor.prepare_validation_data(prop_test_fg + prop_test_bg)
             # 使用source domain的proposal进行训练，而不仅仅是gt，因为gt数量过少，且不具有roi的特征代表性
-            # category_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, distributed=distributed, num_gpus=num_gpus)
+            category_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, distributed=distributed, num_gpus=num_gpus)
             
-            category_adaptor.fit(data_loader_source, data_loader_target, distributed=distributed, num_gpus=num_gpus)
         
         if args.use_best_category is not None:
             if comm.is_main_process():
@@ -330,9 +331,9 @@ def train(model, logger, cfg, args, args_cls, args_box):
         bbox_adaptor = bbox_adaptation_new1.BoundingBoxAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "bbox_{}".format(cascade_id)), args_box)
         # if not bbox_adaptor.load_checkpoint():
         if True:
-            data_loader_source = bbox_adaptor.prepare_training_data(prop_s_fg, True, domain_flag='source', distributed=distributed)
-            data_loader_target = bbox_adaptor.prepare_training_data(prop_t_fg, False, domain_flag='source', distributed=distributed)
-            data_loader_validation = bbox_adaptor.prepare_validation_data(prop_t_fg)
+            data_loader_source = bbox_adaptor.prepare_training_data(prop_s_fg, True, domain_flag='source', distributed=distributed, crop_img_dir=source_crop_proposal_save_root)
+            data_loader_target = bbox_adaptor.prepare_training_data(prop_t_fg, False, domain_flag='source', distributed=distributed, crop_img_dir=target_crop_proposal_save_root)
+            data_loader_validation = bbox_adaptor.prepare_validation_data(prop_t_fg, crop_img_dir=target_crop_proposal_save_root)
             # if comm.is_main_process():
             #     bbox_adaptor.validate_baseline(data_loader_validation)
             if distributed:
@@ -341,22 +342,23 @@ def train(model, logger, cfg, args, args_cls, args_box):
             bbox_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, distributed=distributed, num_gpus=num_gpus, debug=args.debug)
             if distributed:
                 dist.barrier()
+
         # generate bounding box labels for each proposals
         cache_feedback_root = os.path.join(cfg.OUTPUT_DIR, "cache", "feedback_bbox")
         if args.use_best_bbox is not None:
             if comm.is_main_process():
                 print('loading best bbox adaptor...')
             bbox_adaptor.load_checkpoint(name=args.use_best_bbox)
-            # bbox_adaptor.model.cuda()
-            # print('loading done.')
+
+
         prop_t_fg_refined = generate_bounding_box_labels(
-            prop_t_fg, bbox_adaptor, classes,
-            os.path.join(cache_feedback_root, "{}_fg_{}.json".format(args.targets[0], cascade_id))
-        )
+            prop_t_fg, bbox_adaptor, classes, 
+            os.path.join(cache_feedback_root, "{}_fg_{}.json".format(args.targets[0], cascade_id)), 
+            crop_img_dir=target_crop_proposal_save_root)
         prop_t_bg_refined = generate_bounding_box_labels(
             prop_t_bg, bbox_adaptor, classes,
-            os.path.join(cache_feedback_root, "{}_bg_{}.json".format(args.targets[0], cascade_id))
-        )
+            os.path.join(cache_feedback_root, "{}_bg_{}.json".format(args.targets[0], cascade_id)), 
+            crop_img_dir=target_crop_proposal_save_root)
         prop_t_fg += prop_t_fg_refined
         prop_t_bg += prop_t_bg_refined
         bbox_adaptor.model.to(torch.device("cpu"))

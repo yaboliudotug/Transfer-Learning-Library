@@ -421,7 +421,7 @@ class CategoryAdaptor:
                             dest='weight_decay')
         parser.add_argument('--workers-c', default=2, type=int, metavar='N',
                             help='number of data loading workers (default: 2)')
-        parser.add_argument('--epochs-c', default=2, type=int, metavar='N',
+        parser.add_argument('--epochs-c', default=60, type=int, metavar='N',
                             help='number of total epochs to run')   # 10
         parser.add_argument('--iters-per-epoch-c', default=1000, type=int,
                             help='Number of iterations per epoch')

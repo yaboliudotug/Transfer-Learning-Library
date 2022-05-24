@@ -173,7 +173,8 @@ class BoundingBoxAdaptor:
         else:
             return False
 
-    def prepare_training_data(self, proposal_list: PersistentProposalList, labeled=True, domain_flag='source', distributed=False):
+    def prepare_training_data(self, proposal_list: PersistentProposalList, labeled=True, domain_flag='source', 
+                            distributed=False, crop_img_dir=None):
         if not labeled:
             # remove (predicted) background proposals
             filtered_proposals_list = []
@@ -198,7 +199,7 @@ class BoundingBoxAdaptor:
             normalize
         ])
 
-        dataset = ProposalDataset(filtered_proposals_list, transform, crop_func=ExpandCrop(self.args.expand))
+        dataset = ProposalDataset(filtered_proposals_list, transform, crop_func=ExpandCrop(self.args.expand), crop_img_dir=crop_img_dir)
         if distributed:
             if domain_flag == 'source':
                 self.source_train_sampler = DistributedSampler(dataset, drop_last=True)
@@ -214,7 +215,7 @@ class BoundingBoxAdaptor:
                                 shuffle=True, num_workers=self.args.workers, drop_last=True)
         return dataloader
 
-    def prepare_validation_data(self, proposal_list: PersistentProposalList):
+    def prepare_validation_data(self, proposal_list: PersistentProposalList, crop_img_dir=None):
         normalize = T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         transform = T.Compose([
             T.Resize((self.args.resize_size, self.args.resize_size)),
@@ -230,13 +231,13 @@ class BoundingBoxAdaptor:
             filtered_proposals_list.append(proposals[keep_indices])
 
         filtered_proposals_list = flatten(filtered_proposals_list, self.args.max_val)
-        dataset = ProposalDataset(filtered_proposals_list, transform, crop_func=ExpandCrop(self.args.expand))
+        dataset = ProposalDataset(filtered_proposals_list, transform, crop_func=ExpandCrop(self.args.expand), crop_img_dir=crop_img_dir)
         # dataset = ProposalDatasetTest(filtered_proposals_list, transform, crop_func=ExpandCrop(self.args.expand))
         dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
                                 shuffle=False, num_workers=self.args.workers, drop_last=False)
         return dataloader
 
-    def prepare_test_data(self, proposal_list: PersistentProposalList, distributed=False):
+    def prepare_test_data(self, proposal_list: PersistentProposalList, distributed=False, crop_img_dir=None):
         normalize = T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         transform = T.Compose([
             T.Resize((self.args.resize_size, self.args.resize_size)),
@@ -244,7 +245,7 @@ class BoundingBoxAdaptor:
             normalize
         ])
 
-        dataset = ProposalDataset(proposal_list, transform, crop_func=ExpandCrop(self.args.expand))
+        dataset = ProposalDataset(proposal_list, transform, crop_func=ExpandCrop(self.args.expand), crop_img_dir=crop_img_dir)
         if distributed:
             sampler = InferenceSampler(len(dataset))
             dataloader = DataLoader(dataset, batch_size=self.args.inference_batch_size,
@@ -389,7 +390,9 @@ class BoundingBoxAdaptor:
 
         if comm.is_main_process():
             print('################# bbox pretraining ################')
+            args.iters_per_epoch=2000
             print('num iters per epoch:', args.iters_per_epoch)
+            
 
 
 
@@ -636,7 +639,7 @@ class BoundingBoxAdaptor:
         parser.add_argument('--trade-off', default=0.1, type=float,
                             help='the trade-off hyper-parameter for transfer loss')
         # training parameters
-        parser.add_argument('--batch-size-b', default=48, type=int,
+        parser.add_argument('--batch-size-b', default=24, type=int,
                             metavar='N',
                             help='mini-batch size (default: 64)') # 32
         parser.add_argument('--iters-perepoch-mode', default='compute_from_epoch', type=str,
@@ -652,7 +655,7 @@ class BoundingBoxAdaptor:
         parser.add_argument('--momentum', default=0.9, type=float, metavar='M', help='momentum')
         parser.add_argument('--workers-b', default=4, type=int, metavar='N',
                             help='number of data loading workers (default: 2)')
-        parser.add_argument('--epochs-b', default=1, type=int, metavar='N',
+        parser.add_argument('--epochs-b', default=8, type=int, metavar='N',
                             help='number of total epochs to run')   #10
         parser.add_argument('--pretrain-lr-b', default=0.001, type=float,
                             metavar='LR', help='initial learning rate')
@@ -660,13 +663,13 @@ class BoundingBoxAdaptor:
         parser.add_argument('--pretrain-lr-decay-b', default=0.75, type=float, help='parameter for lr scheduler')
         parser.add_argument('--pretrain-weight-decay-b', default=1e-3, type=float,
                             metavar='W', help='weight decay (default: 1e-3)')
-        parser.add_argument('--pretrain-epochs-b', default=1, type=int, metavar='N',
+        parser.add_argument('--pretrain-epochs-b', default=6, type=int, metavar='N',
                             help='number of total epochs to run')   # 10
         parser.add_argument('--iters-per-epoch-b', default=1000, type=int,
                             help='Number of iterations per epoch')
         parser.add_argument('--iters-per-epoch-standard-b', default=1000, type=int,
                             help='Number of iterations per epoch')
-        parser.add_argument('--print-freq-b', default=100, type=int,
+        parser.add_argument('--print-freq-b', default=50, type=int,
                             metavar='N', help='print frequency (default: 100)')
         parser.add_argument('--seed-b', default=None, type=int,
                             help='seed for initializing training. ')

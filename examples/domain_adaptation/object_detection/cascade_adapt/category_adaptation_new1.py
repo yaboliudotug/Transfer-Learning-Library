@@ -427,7 +427,8 @@ class CategoryAdaptor:
             if distributed:
                 dist.barrier()
             # evaluate on validation set
-            if comm.is_main_process() and epoch > 3 and (epoch + 1) % args.eval_freq == 0:
+            if comm.is_main_process() and epoch % args.eval_freq == 0:
+            # if comm.is_main_process() and epoch > 3 and (epoch + 1) % args.eval_freq == 0:
                 if data_loader_validation is not None:
                     print('************ Category Validation validating ************')
                     acc1 = self.validate(data_loader_validation, self.model, self.class_names, args)
@@ -651,10 +652,10 @@ class CategoryAdaptor:
         parser.add_argument('--epsilon-c', default=0.01, type=float,
                             help='epsilon hyper-parameter in Robust Cross Entropy')
         # training parameters
-        parser.add_argument('--batch-size-c', default=64, type=int,
+        parser.add_argument('--batch-size-c', default=96, type=int,
                             metavar='N',
                             help='mini-batch size (default: 64)')   #96
-        parser.add_argument('--inference-batch-size-c', default=64, type=int,
+        parser.add_argument('--inference-batch-size-c', default=96, type=int,
                             metavar='N',
                             help='mini-batch size (default: 64)')   #96
 
@@ -677,7 +678,7 @@ class CategoryAdaptor:
                             help='iters-perepoch-mode')    
         parser.add_argument('--coefficient', default=1, type=int,
                             help='iters-perepoch-mode coefficient')                   
-        parser.add_argument('--print-freq-c', default=10, type=int,
+        parser.add_argument('--print-freq-c', default=50, type=int,
                             metavar='N', help='print frequency (default: 100)')
         parser.add_argument('--eval-freq-c', default=1, type=int,
                             metavar='N', help='print frequency (default: 100)')
