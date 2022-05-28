@@ -313,6 +313,7 @@ class CategoryAdaptor:
             args.epochs = 1
             args.iters_per_epoch = 21
 
+        # args.iters_per_epoch = 100
         if comm.is_main_process():
             print('Num iters per epoch: {}'.format(args.iters_per_epoch))
 

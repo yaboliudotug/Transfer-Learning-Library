@@ -13,6 +13,7 @@ import random
 import pprint
 import time
 import cv2
+import numpy as np
 
 from PIL import Image
 import torchvision
@@ -210,7 +211,8 @@ class ProposalGenerator(DatasetEvaluator):
             pred_classes=pred_classes.numpy(),
             pred_scores=pred_scores.numpy(),
             height = height,
-            width = width
+            width = width,
+            fb_set = type
         )
 
         if hasattr(input_instance, 'gt_boxes'):
@@ -271,7 +273,7 @@ class Proposal:
     """
     def __init__(self, image_id, filename, pred_boxes, pred_classes, pred_scores,
                  gt_classes=None, gt_boxes=None, gt_ious=None, gt_fg_classes=None, 
-                 all_gt_classes=None, all_gt_boxes=None, pred_ids=None, height=None, width=None):
+                 all_gt_classes=None, all_gt_boxes=None, pred_ids=None, height=None, width=None, fb_set=None):
         self.image_id = image_id
         self.filename = filename
         self.pred_boxes = pred_boxes
@@ -286,7 +288,7 @@ class Proposal:
         self.pred_ids = pred_ids
         self.height = height
         self.width = width
-
+        self.fb_set = fb_set
     def to_dict(self):
         return {
             "__proposal__": True,
@@ -303,7 +305,8 @@ class Proposal:
             "all_gt_classes": self.all_gt_classes.tolist(),
             "pred_ids": self.pred_ids.tolist(),
             "height": self.height,
-            "width": self.width
+            "width": self.width,
+            "fb_set": self.fb_set
         }
 
     def __str__(self):
@@ -329,7 +332,8 @@ class Proposal:
             all_gt_classes=self.all_gt_classes,
             pred_ids=self.pred_ids[item],
             height=self.height,
-            width=self.width
+            width=self.width,
+            fb_set=self.fb_set
         )
 
 
@@ -361,6 +365,7 @@ def asProposal(dict):
             pred_ids=np.array(dict["pred_ids"]),
             height=dict["height"],
             width=dict["width"],
+            fb_set=dict["fb_set"]
         )
     return dict
 
@@ -447,10 +452,12 @@ class ProposalDataset(datasets.VisionDataset):
         read_mode = ''
         test_dir = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_adapt/test_imgs'
 
+        img_crop, img = None, None
 
         if self.crop_img_dir is not None:
             pred_id = proposal.pred_ids
-            crop_img_name = os.path.basename(proposals.filename).split('.')[0] + '_proposal_{}.jpg'.format(pred_id)
+            fb_set = proposal.fb_set
+            crop_img_name = os.path.basename(proposals.filename).split('.')[0] + '_{}_proposal_{}.jpg'.format(fb_set, pred_id)
             crop_img_path = os.path.join(self.crop_img_dir, crop_img_name)
             if os.path.exists(crop_img_path):
                 img = self.loader(crop_img_path)
@@ -462,6 +469,8 @@ class ProposalDataset(datasets.VisionDataset):
 
         if not crop_loaded_flag:
         # if True:
+        # if False:
+            # print('whole load:{}'.format(os.path.basename(proposals.filename)))
             img = self.loader(proposals.filename)
             # small_img_path = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/crop_img.jpg'
             # img = self.loader(small_img_path)
@@ -470,7 +479,7 @@ class ProposalDataset(datasets.VisionDataset):
 
             # random sample a proposal
             
-            image_width, image_height = img.width, img.height
+            # image_width, image_height = img.width, img.height
             # proposal_dict = proposal.to_dict()
             # proposal_dict.update(width=img.width, height=img.height)
 
@@ -487,7 +496,9 @@ class ProposalDataset(datasets.VisionDataset):
         time_end_read = time.time()
         # print('proposal dataset time, read img:{:.3f}, read_mode:{}'.format(time_end_read - time_start_read, read_mode))
 
-        
+        # if img_crop and img:
+        #     print(np.array(img_crop).shape, np.array(img).shape)
+        #     print(np.array(img_crop) - np.array(img))
 
 
         if self.transform is not None:

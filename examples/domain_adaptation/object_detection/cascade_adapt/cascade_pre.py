@@ -20,6 +20,9 @@ import cv2
 import tqdm
 import time
 
+from torchvision.datasets.folder import default_loader
+from torchvision.transforms.functional import crop
+
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
@@ -101,6 +104,31 @@ def analyze_proposal(proposal_list, class_names, show_save_dir, crop_save_dir, s
     os.makedirs(show_save_dir, exist_ok=True)
     os.makedirs(crop_save_dir, exist_ok=True)
 
+    # only_crop = True
+
+    # if only_crop:
+    #     for proposals in tqdm.tqdm(proposal_list):
+    #         file_path = proposals.filename
+    #         img = default_loader(file_path)
+    #         for idx in range(len(proposals)):
+    #             proposal = proposals[idx]
+    #             x1, y1, x2, y2 = proposal.pred_boxes
+    #             fb_set = proposal.fb_set
+    #             top, left, height, width = int(y1), int(x1), int(y2 - y1), int(x2 - x1)
+    #             # if self.crop_func is not None:
+    #             #     top, left, height, width = self.crop_func(img, top, left, height, width)
+    #             img = crop(img, top, left, height, width)
+    #             pred_id = proposal.pred_ids
+    #             crop_name = os.path.basename(file_path).split('.')[0] + '_{}_proposal_{}.jpg'.format(fb_set, pred_id)
+    #             try:
+    #                 img.save(os.path.join(crop_save_dir, crop_name))
+    #             except:
+    #                 print(crop_name)
+    #     return
+
+
+
+
     palette = {'red': (0, 0, 255), 'green': (0, 255, 0), 'blue': (255, 0, 0)}
     class_names = class_names + ['bg']
     img_height, img_width = 0, 0
@@ -115,11 +143,12 @@ def analyze_proposal(proposal_list, class_names, show_save_dir, crop_save_dir, s
             pred_id = int(proposals.pred_ids[idx])
             pred_class_name = class_names[pred_class]
             pred_box = [int(i) for i in pred_box]   # x1 y1 x2 y2
+            fb_set = proposals.fb_set
             
             if crop_flag:
                 try:
                     crop_img = img_np_clean[pred_box[1]: pred_box[3], pred_box[0]: pred_box[2]]
-                    crop_name = os.path.basename(file_path).split('.')[0] + '_proposal_{}.jpg'.format(pred_id)
+                    crop_name = os.path.basename(file_path).split('.')[0] + '_{}_proposal_{}.jpg'.format(fb_set, pred_id)
                     # print(pred_box, img_np_clean.shape, crop_name)
                     cv2.imwrite(os.path.join(crop_save_dir, crop_name), crop_img)
                 except:
@@ -271,14 +300,14 @@ def train(model, logger, cfg, args, args_cls, args_box):
     crop_proposal_save_root = os.path.join(cfg.OUTPUT_DIR, "cache", "crop_propals")
     source_crop_proposal_save_root = os.path.join(crop_proposal_save_root, 'source')
     target_crop_proposal_save_root = os.path.join(crop_proposal_save_root, 'target')
-    source_crop_proposal_save_root = None
-    target_crop_proposal_save_root = None
+    # source_crop_proposal_save_root = None
+    # target_crop_proposal_save_root = None
 
-    # if comm.is_main_process():  # 
-    #     analyze_proposal(prop_s_fg + prop_s_bg, classes, show_save_dir=os.path.join(gt_pred_show_root, 'source'), 
-    #                     crop_save_dir=source_crop_proposal_save_root, show_scale=0.6, show_flag=show_flag, crop_flag=crop_flag) 
-    #     analyze_proposal(prop_t_fg + prop_t_bg, classes, show_save_dir=os.path.join(gt_pred_show_root, 'target'), 
-    #                     crop_save_dir=target_crop_proposal_save_root, show_scale=0.6, show_flag=show_flag, crop_flag=crop_flag)
+    if comm.is_main_process():  # 
+        analyze_proposal(prop_s_fg + prop_s_bg, classes, show_save_dir=os.path.join(gt_pred_show_root, 'source'), 
+                        crop_save_dir=source_crop_proposal_save_root, show_scale=0.6, show_flag=show_flag, crop_flag=crop_flag) 
+        analyze_proposal(prop_t_fg + prop_t_bg, classes, show_save_dir=os.path.join(gt_pred_show_root, 'target'), 
+                        crop_save_dir=target_crop_proposal_save_root, show_scale=0.6, show_flag=show_flag, crop_flag=crop_flag)
     if distributed:
         dist.barrier()
 
@@ -293,34 +322,34 @@ def train(model, logger, cfg, args, args_cls, args_box):
 
 
 
-        category_adaptor = category_adaptation_new1.CategoryAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "cls_{}".format(cascade_id)), args_cls)
-        # if not category_adaptor.load_checkpoint():
-        if True:
-            data_loader_source = category_adaptor.prepare_training_data(prop_s_fg + prop_s_bg, True, domain_flag='source', 
-                                                                        distributed=distributed, crop_img_dir=source_crop_proposal_save_root)
-            data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False, domain_flag='target', 
-                                                                        distributed=distributed, crop_img_dir=target_crop_proposal_save_root)
-            data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg, crop_img_dir=target_crop_proposal_save_root)
-            # 使用source domain的proposal进行训练，而不仅仅是gt，因为gt数量过少，且不具有roi的特征代表性
-            category_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, distributed=distributed, num_gpus=num_gpus)
+        # category_adaptor = category_adaptation_new1.CategoryAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "cls_{}".format(cascade_id)), args_cls)
+        # # if not category_adaptor.load_checkpoint():
+        # if True:
+        #     data_loader_source = category_adaptor.prepare_training_data(prop_s_fg + prop_s_bg, True, domain_flag='source', 
+        #                                                                 distributed=distributed, crop_img_dir=source_crop_proposal_save_root)
+        #     data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False, domain_flag='target', 
+        #                                                                 distributed=distributed, crop_img_dir=target_crop_proposal_save_root)
+        #     data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg, crop_img_dir=target_crop_proposal_save_root)
+        #     # 使用source domain的proposal进行训练，而不仅仅是gt，因为gt数量过少，且不具有roi的特征代表性
+        #     category_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, distributed=distributed, num_gpus=num_gpus)
             
         
-        if args.use_best_category is not None:
-            if comm.is_main_process():
-                print('loading best category adaptor......')
-            category_adaptor.load_checkpoint(name=args.use_best_category)
-        # generate category labels for each proposals
-        cache_feedback_root = os.path.join(cfg.OUTPUT_DIR, "cache", "feedback")
-        prop_t_fg = generate_category_labels(
-            prop_t_fg, category_adaptor, os.path.join(cache_feedback_root, "{}_fg_{}.json".format(args.targets[0], cascade_id)), 
-            debug=args.debug, distributed=distributed, crop_img_dir=target_crop_proposal_save_root
-        )
-        prop_t_bg = generate_category_labels(
-            prop_t_bg, category_adaptor, os.path.join(cache_feedback_root, "{}_bg_{}.json".format(args.targets[0], cascade_id)), 
-            debug=args.debug, distributed=distributed, crop_img_dir=target_crop_proposal_save_root
-        )
-        # 在此加入两个数据集的评估结果
-        category_adaptor.model.to(torch.device("cpu"))
+        # if args.use_best_category is not None:
+        #     if comm.is_main_process():
+        #         print('loading best category adaptor......')
+        #     category_adaptor.load_checkpoint(name=args.use_best_category)
+        # # generate category labels for each proposals
+        # cache_feedback_root = os.path.join(cfg.OUTPUT_DIR, "cache", "feedback")
+        # prop_t_fg = generate_category_labels(
+        #     prop_t_fg, category_adaptor, os.path.join(cache_feedback_root, "{}_fg_{}.json".format(args.targets[0], cascade_id)), 
+        #     debug=args.debug, distributed=distributed, crop_img_dir=target_crop_proposal_save_root
+        # )
+        # prop_t_bg = generate_category_labels(
+        #     prop_t_bg, category_adaptor, os.path.join(cache_feedback_root, "{}_bg_{}.json".format(args.targets[0], cascade_id)), 
+        #     debug=args.debug, distributed=distributed, crop_img_dir=target_crop_proposal_save_root
+        # )
+        # # 在此加入两个数据集的评估结果
+        # category_adaptor.model.to(torch.device("cpu"))
 
 
 
@@ -338,7 +367,7 @@ def train(model, logger, cfg, args, args_cls, args_box):
             #     bbox_adaptor.validate_baseline(data_loader_validation)
             if distributed:
                 dist.barrier()
-            print('>>>>>>>>> debug', args.debug)
+            # print('>>>>>>>>> debug', args.debug)
             bbox_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, distributed=distributed, num_gpus=num_gpus, debug=args.debug)
             if distributed:
                 dist.barrier()
