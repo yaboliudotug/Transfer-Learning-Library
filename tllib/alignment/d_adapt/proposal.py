@@ -336,6 +336,76 @@ class Proposal:
             fb_set=self.fb_set
         )
 
+    def extend_0(self, proposal):
+        assert self.image_id == proposal.image_id, 'image_id is not the same: {}, {}'.format(self.image_id, proposal.image_id)
+        assert self.filename == proposal.filename, 'filename is not the same: {}, {}'.format(self.filename, proposal.filename)
+        # self.image_id = proposal.image_id
+        # self.filename = proposal.filename
+        # if len(proposal.pred_boxes) and len(proposal.pred_boxes)
+        self.pred_boxes = np.concatenate(self.pred_boxes, proposal.pred_boxes) if len(proposal.pred_boxes) else self.pred_boxes
+        self.pred_classes = np.concatenate(self.pred_classes, proposal.pred_classes) if len(proposal.pred_classes) else self.pred_classes
+        self.pred_scores = np.concatenate(self.pred_scores, proposal.pred_scores) if len(proposal.pred_scores) else self.pred_scores
+        self.gt_classes = np.concatenate(self.gt_classes, proposal.gt_classes) if len(proposal.gt_classes) else self.gt_classes
+        self.gt_boxes = np.concatenate(self.gt_boxes, proposal.gt_boxes) if len(proposal.gt_boxes) else self.gt_boxes
+        self.gt_ious = np.concatenate(self.gt_ious, proposal.gt_ious) if len(proposal.gt_ious) else self.gt_ious
+        self.gt_fg_classes = np.concatenate(self.gt_fg_classes, proposal.gt_fg_classes) if len(proposal.gt_fg_classes) else self.gt_fg_classes
+        # self.all_gt_classes = proposal.all_gt_classes
+        # self.all_gt_boxes = proposal.all_gt_boxes
+        self.pred_ids = np.concatenate(self.pred_ids, proposal.pred_ids) if len(proposal.pred_ids) else self.pred_ids
+        # self.height = proposal.height
+        # self.width = proposal.width
+        # self.fb_set = proposal.fb_set
+        return self
+
+    def extend(self, proposal):
+        assert self.image_id == proposal.image_id, 'image_id is not the same: {}, {}'.format(self.image_id, proposal.image_id)
+        assert self.filename == proposal.filename, 'filename is not the same: {}, {}'.format(self.filename, proposal.filename)
+        # self.image_id = proposal.image_id
+        # self.filename = proposal.filename
+        if len(self.pred_boxes) and len(proposal.pred_boxes):
+            # print(self.pred_boxes)
+            # print(proposal.pred_boxes)
+            self.pred_boxes = np.concatenate([self.pred_boxes, proposal.pred_boxes]) 
+        elif len(proposal.pred_boxes):
+            self.pred_boxes =  proposal.pred_boxes
+        
+        if len(self.pred_classes) and len(proposal.pred_classes):
+            self.pred_classes = np.concatenate([self.pred_classes, proposal.pred_classes])
+        elif len(proposal.pred_classes):
+            self.pred_classes = proposal.pred_classes
+
+        if len(self.pred_scores) and len(proposal.pred_scores):
+            self.pred_scores = np.concatenate([self.pred_scores, proposal.pred_scores])
+        elif len(proposal.pred_scores):
+            self.pred_scores = proposal.pred_scores
+
+        if len(self.gt_classes) and len(proposal.gt_classes):
+            self.gt_classes = np.concatenate([self.gt_classes, proposal.gt_classes])
+        elif len(proposal.gt_classes):
+            self.gt_classes = proposal.gt_classes
+
+        if len(self.gt_boxes) and len(proposal.gt_boxes):
+            self.gt_boxes = np.concatenate([self.gt_boxes, proposal.gt_boxes])
+        elif len(proposal.gt_boxes):
+            self.gt_boxes = proposal.gt_boxes
+
+        if len(self.gt_ious) and len(proposal.gt_ious):
+            self.gt_ious = np.concatenate([self.gt_ious, proposal.gt_ious]) 
+        elif len(proposal.gt_ious):
+            self.gt_ious = proposal.gt_ious
+
+        if len(self.gt_fg_classes) and len(proposal.gt_fg_classes):
+            self.gt_fg_classes = np.concatenate([self.gt_fg_classes, proposal.gt_fg_classes]) 
+        elif len(proposal.gt_fg_classes):
+            self.gt_fg_classes = proposal.gt_fg_classes
+
+        if len(self.pred_ids) and len(proposal.pred_ids):
+            self.pred_ids = np.concatenate([self.pred_ids, proposal.pred_ids]) 
+        elif len(proposal.pred_ids):
+            self.pred_ids = proposal.pred_ids
+        return self
+
+
 
 class ProposalEncoder(json.JSONEncoder):
     def default(self, obj):

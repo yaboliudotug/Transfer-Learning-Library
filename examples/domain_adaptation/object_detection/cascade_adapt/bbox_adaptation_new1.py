@@ -174,7 +174,7 @@ class BoundingBoxAdaptor:
             return False
 
     def prepare_training_data(self, proposal_list: PersistentProposalList, labeled=True, domain_flag='source', 
-                            distributed=False, crop_img_dir=None, ):
+                            distributed=False, crop_img_dir=None, pre_train=False):
         if not labeled:
             # remove (predicted) background proposals
             filtered_proposals_list = []
@@ -203,16 +203,28 @@ class BoundingBoxAdaptor:
         if distributed:
             if domain_flag == 'source':
                 self.source_train_sampler = DistributedSampler(dataset, drop_last=True)
-                dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
-                                    sampler=self.source_train_sampler, num_workers=self.args.workers, drop_last=True)
+                if pre_train:
+                    dataloader = DataLoader(dataset, batch_size=self.args.pretrain_batch_size,
+                                        sampler=self.source_train_sampler, num_workers=self.args.workers, drop_last=True)
+                else:
+                    dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
+                                        sampler=self.source_train_sampler, num_workers=self.args.workers, drop_last=True)
+
             elif domain_flag == 'target':
                 self.target_train_sampler = DistributedSampler(dataset, drop_last=True)
+                if pre_train:
+                    dataloader = DataLoader(dataset, batch_size=self.args.pretrain_batch_size,
+                                        sampler=self.target_train_sampler, num_workers=self.args.workers, drop_last=True)
+                else:
+                    dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
+                                        sampler=self.target_train_sampler, num_workers=self.args.workers, drop_last=True)
+        else:
+            if pre_train:
+                dataloader = DataLoader(dataset, batch_size=self.args.pretrain_batch_size,
+                                        shuffle=True, num_workers=self.args.workers, drop_last=True)
+            else:
                 dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
-                                    sampler=self.target_train_sampler, num_workers=self.args.workers, drop_last=True)
-
-
-        dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
-                                shuffle=True, num_workers=self.args.workers, drop_last=True)
+                                        shuffle=True, num_workers=self.args.workers, drop_last=True)
         return dataloader
 
     def prepare_validation_data(self, proposal_list: PersistentProposalList, crop_img_dir=None):
@@ -250,8 +262,9 @@ class BoundingBoxAdaptor:
             sampler = InferenceSampler(len(dataset))
             dataloader = DataLoader(dataset, batch_size=self.args.inference_batch_size,
                                 sampler=sampler, num_workers=self.args.workers, drop_last=False)
-        dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
-                                shuffle=False, num_workers=self.args.workers, drop_last=False)
+        else:
+            dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
+                                    shuffle=False, num_workers=self.args.workers, drop_last=False)
         return dataloader
 
     def predict(self, data_loader):
@@ -333,7 +346,7 @@ class BoundingBoxAdaptor:
 
         return ious.avg
 
-    def fit(self, data_loader_source, data_loader_target, data_loader_validation=None, data_loader_test=None, distributed=False, num_gpus=1, debug=False):
+    def fit(self, data_loader_source, data_loader_source_pretrain, data_loader_target, data_loader_validation=None, data_loader_test=None, distributed=False, num_gpus=1, debug=False):
         """When no labels exists on target domain, please set data_loader_validation=None"""
         args = self.args
         # print(args)
@@ -351,6 +364,7 @@ class BoundingBoxAdaptor:
 
         iter_source = ForeverDataIterator(data_loader_source)
         iter_target = ForeverDataIterator(data_loader_target)
+        iter_source_pretrain = ForeverDataIterator(data_loader_source_pretrain)
 
 
         best_iou = 0.
@@ -369,20 +383,20 @@ class BoundingBoxAdaptor:
             head=nn.Linear(self.model.backbone.out_features, len(self.class_names) * 4),
             bottleneck_dim=self.model.backbone.out_features
         ).to(device)
-        if distributed:
-            model = DistributedDataParallel(
-                model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True
-            )
+        
 
 
         optimizer = Adam(model.get_parameters(), args.pretrain_lr, weight_decay=args.pretrain_weight_decay)
         lr_scheduler = LambdaLR(optimizer, lambda x: args.pretrain_lr * (1. + args.pretrain_lr_gamma * float(x)) ** (-args.pretrain_lr_decay))
 
         
-
+        if distributed:
+            model = DistributedDataParallel(
+                model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True
+            )
 
         if args.iters_perepoch_mode == 'compute_from_epoch':
-            num_iters_source = len(iter_source)
+            num_iters_source = len(iter_source_pretrain)
             args.iters_per_epoch = int(num_iters_source * args.coefficient)
         if debug:
             args.pretrain_epochs = 1
@@ -390,7 +404,7 @@ class BoundingBoxAdaptor:
 
         if comm.is_main_process():
             print('################# bbox pretraining ################')
-            args.iters_per_epoch=2000
+            # args.iters_per_epoch=2000
             print('num iters per epoch:', args.iters_per_epoch)
             
 
@@ -416,7 +430,8 @@ class BoundingBoxAdaptor:
             end = time.time()
             print_end = time.time()
             for i in range(args.iters_per_epoch):
-                x_s, labels_s = next(iter_source)
+                x_s, labels_s = next(iter_source_pretrain)
+                # x_s, labels_s = next(iter_source)
                 x_s = x_s.to(device)
                 # bounding box offsets
                 delta_s = box_transform.box_transform.get_deltas(labels_s['pred_boxes'], labels_s['gt_boxes']).to(device).float()
@@ -521,10 +536,10 @@ class BoundingBoxAdaptor:
             # switch to train mode
             model.train()
             mdd = RegressionMarginDisparityDiscrepancy(args.margin).to(device)
-            if distributed:
-                mdd = DistributedDataParallel(
-                mdd, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True
-            )
+            # if distributed:
+            #     mdd = DistributedDataParallel(
+            #     mdd, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True
+            # )
 
             end = time.time()
             for i in range(args.iters_per_epoch):
@@ -645,9 +660,12 @@ class BoundingBoxAdaptor:
         parser.add_argument('--batch-size-b', default=24, type=int,
                             metavar='N',
                             help='mini-batch size (default: 64)') # 32
+        parser.add_argument('--pretrain-batch-size', default=48, type=int,
+                            metavar='N',
+                            help='pretrain mini-batch size (default: 64)') 
         parser.add_argument('--iters-perepoch-mode', default='compute_from_epoch', type=str,
                             help='iters-perepoch-mode')     
-        parser.add_argument('--coefficient', default=10, type=int,
+        parser.add_argument('--coefficient', default=1, type=int,
                             help='iters-perepoch-mode coefficient')                        
         parser.add_argument('--lr-b', default=0.004, type=float,
                             metavar='LR', help='initial learning rate')
@@ -658,15 +676,15 @@ class BoundingBoxAdaptor:
         parser.add_argument('--momentum', default=0.9, type=float, metavar='M', help='momentum')
         parser.add_argument('--workers-b', default=4, type=int, metavar='N',
                             help='number of data loading workers (default: 2)')
-        parser.add_argument('--epochs-b', default=1, type=int, metavar='N',
-                            help='number of total epochs to run')   #10
+        parser.add_argument('--epochs-b', default=2, type=int, metavar='N',
+                            help='number of total epochs to run')   #2
         parser.add_argument('--pretrain-lr-b', default=0.001, type=float,
                             metavar='LR', help='initial learning rate')
         parser.add_argument('--pretrain-lr-gamma-b', default=0.0002, type=float, help='parameter for lr scheduler')
         parser.add_argument('--pretrain-lr-decay-b', default=0.75, type=float, help='parameter for lr scheduler')
         parser.add_argument('--pretrain-weight-decay-b', default=1e-3, type=float,
                             metavar='W', help='weight decay (default: 1e-3)')
-        parser.add_argument('--pretrain-epochs-b', default=1, type=int, metavar='N',
+        parser.add_argument('--pretrain-epochs-b', default=10, type=int, metavar='N',
                             help='number of total epochs to run')   # 10
         parser.add_argument('--iters-per-epoch-b', default=1000, type=int,
                             help='Number of iterations per epoch')

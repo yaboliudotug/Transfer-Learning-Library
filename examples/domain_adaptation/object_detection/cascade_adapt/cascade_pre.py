@@ -322,34 +322,35 @@ def train(model, logger, cfg, args, args_cls, args_box):
 
 
 
-        # category_adaptor = category_adaptation_new1.CategoryAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "cls_{}".format(cascade_id)), args_cls)
-        # # if not category_adaptor.load_checkpoint():
-        # if True:
-        #     data_loader_source = category_adaptor.prepare_training_data(prop_s_fg + prop_s_bg, True, domain_flag='source', 
-        #                                                                 distributed=distributed, crop_img_dir=source_crop_proposal_save_root)
-        #     data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False, domain_flag='target', 
-        #                                                                 distributed=distributed, crop_img_dir=target_crop_proposal_save_root)
-        #     data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg, crop_img_dir=target_crop_proposal_save_root)
-        #     # 使用source domain的proposal进行训练，而不仅仅是gt，因为gt数量过少，且不具有roi的特征代表性
-        #     category_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, distributed=distributed, num_gpus=num_gpus)
+        category_adaptor = category_adaptation_new1.CategoryAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "cls_{}".format(cascade_id)), args_cls)
+        # if not category_adaptor.load_checkpoint():
+        if True:
+            data_loader_source = category_adaptor.prepare_training_data(prop_s_fg + prop_s_bg, True, domain_flag='source', 
+                                                                        distributed=distributed, crop_img_dir=source_crop_proposal_save_root)
+            data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False, domain_flag='target', 
+                                                                        distributed=distributed, crop_img_dir=target_crop_proposal_save_root)
+            data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg, crop_img_dir=target_crop_proposal_save_root)
+            # 使用source domain的proposal进行训练，而不仅仅是gt，因为gt数量过少，且不具有roi的特征代表性
+            category_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, distributed=distributed, num_gpus=num_gpus)
             
         
         # if args.use_best_category is not None:
         #     if comm.is_main_process():
         #         print('loading best category adaptor......')
         #     category_adaptor.load_checkpoint(name=args.use_best_category)
-        # # generate category labels for each proposals
-        # cache_feedback_root = os.path.join(cfg.OUTPUT_DIR, "cache", "feedback")
-        # prop_t_fg = generate_category_labels(
-        #     prop_t_fg, category_adaptor, os.path.join(cache_feedback_root, "{}_fg_{}.json".format(args.targets[0], cascade_id)), 
-        #     debug=args.debug, distributed=distributed, crop_img_dir=target_crop_proposal_save_root
-        # )
-        # prop_t_bg = generate_category_labels(
-        #     prop_t_bg, category_adaptor, os.path.join(cache_feedback_root, "{}_bg_{}.json".format(args.targets[0], cascade_id)), 
-        #     debug=args.debug, distributed=distributed, crop_img_dir=target_crop_proposal_save_root
-        # )
-        # # 在此加入两个数据集的评估结果
-        # category_adaptor.model.to(torch.device("cpu"))
+
+        # generate category labels for each proposals
+        cache_feedback_root = os.path.join(cfg.OUTPUT_DIR, "cache", "feedback")
+        prop_t_fg = generate_category_labels(
+            prop_t_fg, category_adaptor, os.path.join(cache_feedback_root, "{}_fg_{}.json".format(args.targets[0], cascade_id)), 
+            debug=args.debug, distributed=distributed, crop_img_dir=target_crop_proposal_save_root
+        )
+        prop_t_bg = generate_category_labels(
+            prop_t_bg, category_adaptor, os.path.join(cache_feedback_root, "{}_bg_{}.json".format(args.targets[0], cascade_id)), 
+            debug=args.debug, distributed=distributed, crop_img_dir=target_crop_proposal_save_root
+        )
+        # 在此加入两个数据集的评估结果
+        category_adaptor.model.to(torch.device("cpu"))
 
 
 
@@ -362,23 +363,25 @@ def train(model, logger, cfg, args, args_cls, args_box):
         if True:
             data_loader_source = bbox_adaptor.prepare_training_data(prop_s_fg, True, domain_flag='source', distributed=distributed, crop_img_dir=source_crop_proposal_save_root)
             data_loader_target = bbox_adaptor.prepare_training_data(prop_t_fg, False, domain_flag='source', distributed=distributed, crop_img_dir=target_crop_proposal_save_root)
+            data_loader_source_pretrain = bbox_adaptor.prepare_training_data(prop_s_fg, True, domain_flag='source', distributed=distributed, crop_img_dir=source_crop_proposal_save_root, pre_train=True)
             data_loader_validation = bbox_adaptor.prepare_validation_data(prop_t_fg, crop_img_dir=target_crop_proposal_save_root)
+            
             # if comm.is_main_process():
             #     bbox_adaptor.validate_baseline(data_loader_validation)
             if distributed:
                 dist.barrier()
             # print('>>>>>>>>> debug', args.debug)
-            bbox_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, distributed=distributed, num_gpus=num_gpus, debug=args.debug)
+            bbox_adaptor.fit(data_loader_source, data_loader_source_pretrain, data_loader_target, data_loader_validation, distributed=distributed, num_gpus=num_gpus, debug=args.debug)
             if distributed:
                 dist.barrier()
 
         # generate bounding box labels for each proposals
         cache_feedback_root = os.path.join(cfg.OUTPUT_DIR, "cache", "feedback_bbox")
-        if args.use_best_bbox is not None:
-            if comm.is_main_process():
-                print('loading best bbox adaptor...')
-            bbox_adaptor.load_checkpoint(name=args.use_best_bbox)
 
+        # if args.use_best_bbox is not None:
+        #     if comm.is_main_process():
+        #         print('loading best bbox adaptor...')
+        #     bbox_adaptor.load_checkpoint(name=args.use_best_bbox)
 
         prop_t_fg_refined = generate_bounding_box_labels(
             prop_t_fg, bbox_adaptor, classes, 
@@ -512,7 +515,7 @@ if __name__ == "__main__":
     # pprint.pprint(args_box)
 
     parser = argparse.ArgumentParser(add_help=True)
-    parser.add_argument('--num-cascade', default=60, type=int, help='num_category_cascade')
+    parser.add_argument('--num-cascade', default=3, type=int, help='num_category_cascade')
     parser.add_argument('--use-best-category', default='best_test', type=str, help='use-best')
     parser.add_argument('--use-best-bbox', default='best_test', type=str, help='use-best')
     parser.add_argument('--show-gt', default='show_gt', type=str, help='show_gt')

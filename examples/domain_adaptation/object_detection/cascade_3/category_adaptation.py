@@ -113,7 +113,7 @@ class CategoryAdaptor:
         else:
             return False
 
-    def prepare_training_data(self, proposal_list: List[Proposal], labeled=True):
+    def prepare_training_data(self, proposal_list: List[Proposal], labeled=True, crop_img_dir=None):
         if not labeled:
             # remove proposals with confidence score between (ignored_scores[0], ignored_scores[1])
             filtered_proposals_list = []
@@ -149,12 +149,12 @@ class CategoryAdaptor:
             normalize
         ])
 
-        dataset = ProposalDataset(filtered_proposals_list, transform)
+        dataset = ProposalDataset(filtered_proposals_list, transform, crop_img_dir=crop_img_dir)
         dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
                                 shuffle=True, num_workers=self.args.workers, drop_last=True)
         return dataloader
 
-    def prepare_validation_data(self, proposal_list: List[Proposal]):
+    def prepare_validation_data(self, proposal_list: List[Proposal], crop_img_dir=None):
         """call this function if you have labeled data for validation"""
         normalize = T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         transform = T.Compose([
@@ -170,12 +170,12 @@ class CategoryAdaptor:
             filtered_proposals_list.append(proposals[keep_indices])
 
         filtered_proposals_list = flatten(filtered_proposals_list, self.args.max_val)
-        dataset = ProposalDataset(filtered_proposals_list, transform)
+        dataset = ProposalDataset(filtered_proposals_list, transform, crop_img_dir=crop_img_dir)
         dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
                                 shuffle=False, num_workers=self.args.workers, drop_last=False)
         return dataloader
 
-    def prepare_test_data(self, proposal_list: List[Proposal]):
+    def prepare_test_data(self, proposal_list: List[Proposal], crop_img_dir=None):
         normalize = T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         transform = T.Compose([
             ResizeImage(self.args.resize_size),
@@ -183,7 +183,7 @@ class CategoryAdaptor:
             normalize
         ])
 
-        dataset = ProposalDataset(proposal_list, transform)
+        dataset = ProposalDataset(proposal_list, transform, crop_img_dir=crop_img_dir)
         dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
                                 shuffle=False, num_workers=self.args.workers, drop_last=False)
         return dataloader
@@ -419,12 +419,12 @@ class CategoryAdaptor:
         parser.add_argument('--weight-decay-c', default=1e-3, type=float,
                             metavar='W', help='weight decay (default: 1e-3)',
                             dest='weight_decay')
-        parser.add_argument('--workers-c', default=2, type=int, metavar='N',
+        parser.add_argument('--workers-c', default=4, type=int, metavar='N',
                             help='number of data loading workers (default: 2)')
-        parser.add_argument('--epochs-c', default=10, type=int, metavar='N',
+        parser.add_argument('--epochs-c', default=1, type=int, metavar='N',
                             help='number of total epochs to run')   # 10
-        parser.add_argument('--iters-per-epoch-c', default=1000, type=int,
-                            help='Number of iterations per epoch')
+        parser.add_argument('--iters-per-epoch-c', default=500, type=int,
+                            help='Number of iterations per epoch') # 1000
         parser.add_argument('--print-freq-c', default=100, type=int,
                             metavar='N', help='print frequency (default: 100)')
         parser.add_argument('--seed-c', default=None, type=int,
