@@ -389,10 +389,10 @@ def train(model, logger, cfg, args, args_cls, args_box):
         # train the category adaptor
         category_adaptor = category_adaptation.CategoryAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "cls_{}".format(cascade_id)), args_cls)
         # if not category_adaptor.load_checkpoint():
-        if cascade_id == 0:
-            category_adaptor.load_checkpoint()
-        else:
-        # if True:
+        # if cascade_id == 0:
+        #     category_adaptor.load_checkpoint()
+        # else:
+        if True:
             data_loader_source = category_adaptor.prepare_training_data(prop_s_fg + prop_s_bg, True, 
                                                                         crop_img_dir=source_crop_proposal_save_root)
             data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False,

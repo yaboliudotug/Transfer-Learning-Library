@@ -523,7 +523,7 @@ class ProposalDataset(datasets.VisionDataset):
         test_dir = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_adapt/test_imgs'
 
         img_crop, img = None, None
-
+        # print(self.crop_img_dir)
         if self.crop_img_dir is not None:
             pred_id = proposal.pred_ids
             fb_set = proposal.fb_set
