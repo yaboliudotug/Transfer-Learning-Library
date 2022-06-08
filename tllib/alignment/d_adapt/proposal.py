@@ -403,7 +403,7 @@ class Proposal:
             self.pred_ids = np.concatenate([self.pred_ids, proposal.pred_ids]) 
         elif len(proposal.pred_ids):
             self.pred_ids = proposal.pred_ids
-        return self
+        # return self
 
 
 

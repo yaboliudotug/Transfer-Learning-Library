@@ -3,9 +3,11 @@
 @author: Junguang Jiang
 @contact: JiangJunguang1123@outlook.com
 """
+from genericpath import exists
 import logging
 import os
 import argparse
+from pickle import NONE
 from random import random, shuffle
 import sys
 import pprint
@@ -15,6 +17,7 @@ import cv2
 from regex import L
 import tqdm
 import copy
+# import copy
 
 import torch
 from torch.nn.parallel import DistributedDataParallel
@@ -152,19 +155,22 @@ def generate_proposals(model, num_classes, dataset_names, cache_root, cfg):
 
 def generate_category_labels(prop, category_adaptor, cache_filename, crop_img_dir=None, cascade_id=0):
     """Generate category labels for each proposals in `prop` and save them to the disk"""
+    update_score = False
     prop_w_category = PersistentProposalList(cache_filename)
-    if cascade_id == 0:
-        prop_w_category.load()
-        return prop_w_category
+    # if cascade_id == 0:
+    #     prop_w_category.load()
+    #     return prop_w_category
     if True:
     # if not prop_w_category.load():
         for p in prop:
             prop_w_category.append(p)
 
         data_loader_test = category_adaptor.prepare_test_data(flatten(prop_w_category), crop_img_dir=crop_img_dir)
-        predictions = category_adaptor.predict(data_loader_test)
+        predictions, scores = category_adaptor.predict(data_loader_test)
         for p in prop_w_category:
             p.pred_classes = np.array([predictions.popleft() for _ in range(len(p))])
+            if update_score:
+                p.pred_scores = np.array([scores.popleft() for _ in range(len(p))])
         prop_w_category.flush()
     return prop_w_category
 
@@ -172,7 +178,7 @@ def generate_category_labels(prop, category_adaptor, cache_filename, crop_img_di
 def generate_bounding_box_labels_0(prop, bbox_adaptor, class_names, cache_filename, crop_img_dir=None, remove_bg=False):
     """Generate bounding box labels for each proposals in `prop` and save them to the disk"""
     prop_w_bbox = PersistentProposalList(cache_filename)
-    # prop_w_bbox_bg = PersistentProposalList()
+    prop_w_bbox_temp = PersistentProposalList()
     # if not prop_w_bbox.load():
     if True:
         # remove (predicted) background proposals
@@ -185,6 +191,7 @@ def generate_bounding_box_labels_0(prop, bbox_adaptor, class_names, cache_filena
             p.pred_boxes = np.array([predictions.popleft() for _ in range(len(p))])
         if not remove_bg:
             for p in prop:
+            # for i in range(len(prop)):
                 keep_indices = (0 <= p.pred_classes) & (p.pred_classes < len(class_names))
                 prop_w_bbox.append(p[~keep_indices])
         prop_w_bbox.flush()
@@ -193,113 +200,55 @@ def generate_bounding_box_labels_0(prop, bbox_adaptor, class_names, cache_filena
 def generate_bounding_box_labels(prop, bbox_adaptor, class_names, cache_filename, crop_img_dir=None, remove_bg=False, cascade_id=0):
     """Generate bounding box labels for each proposals in `prop` and save them to the disk"""
     prop_w_bbox = PersistentProposalList(cache_filename)
-    prop_w_bbox_bg = PersistentProposalList()
-    # if not prop_w_bbox.load():
-    if True:
-        # remove (predicted) background proposals
-        for p in prop:
-            # if remove_bg:
-            keep_indices = (0 <= p.pred_classes) & (p.pred_classes < len(class_names))
-            prop_w_bbox.append(p[keep_indices])
-            # prop_w_bbox.append(p[~keep_indices])
-            # prop_w_bbox.append(p)
-            # else:
-            #     prop_w_bbox.append(p)
-
-        data_loader_test = bbox_adaptor.prepare_test_data(flatten(prop_w_bbox), crop_img_dir=crop_img_dir)
-        predictions = bbox_adaptor.predict(data_loader_test)
-        for p in prop_w_bbox:
-            p.pred_boxes = np.array([predictions.popleft() for _ in range(len(p))])
-        if not remove_bg:
-            prop_w_bbox += prop_w_bbox_bg
-        prop_w_bbox.flush()
-    return prop_w_bbox
-
-def generate_bounding_box_labels_1(prop, bbox_adaptor, class_names, cache_filename, crop_img_dir=None, remove_bg=False, cascade_id=0):
-    """Generate bounding box labels for each proposals in `prop` and save them to the disk"""
-    prop_w_bbox = PersistentProposalList(cache_filename)
-    prop_w_bbox_bg = PersistentProposalList()
     prop_w_bbox_fg = PersistentProposalList()
-    prop_w_bbox_mix = PersistentProposalList()
-    prop_w_bbox_ext = PersistentProposalList(cache_filename.split('.json')[0] + '_ext.json')
-    # if not prop_w_bbox.load():
+    prop_w_bbox_bg = PersistentProposalList()
+    
     # if cascade_id == 0:
     #     prop_w_bbox.load()
     #     return prop_w_bbox
-    if True:
+    if not prop_w_bbox.load():
+    # if True:
         # remove (predicted) background proposals
+        indices_fg_ls = []
+        indices_bg_ls = []
         for p in prop:
             keep_indices = (0 <= p.pred_classes) & (p.pred_classes < len(class_names))
-            bg_indices = (p.pred_classes < 0) & (p.pred_classes >= len(class_names))
-            # prop_w_bbox.append(p[keep_indices])
-            # prop_w_bbox.append(p[bg_indices])
-            # fg_idx = np.where(keep_indices)
-            # prop_w_bbox.append(p)
-            # prop_w_bbox_fg.append(p[keep_indices])
-            # prop_w_bbox_bg.append(p[~keep_indices])
-            # prop_w_bbox_mix.append(p[keep_indices])
-            # prop_w_bbox_mix.append(p[~keep_indices])
-            # print('>>>')
-            # print(len(p[keep_indices]))
-            # print(len(p[~keep_indices]))
-            # a = p[keep_indices].extend(p[bg_indices])
-            # idx = keep_indices + bg_indices
-            idx = list(range(len(p.pred_classes)))
-            # print('>>>>')
-            # print(idx)
-            idx_len = len(idx) // 2
-            idx = idx[idx_len:] + idx[:idx_len]
-            # print(idx)
-            a = p[idx]
-            prop_w_bbox.append(a)
-            # # if cascade_id > 0:
-            # if True:
-            #     print('>>>')
-            #     print(len(p))
-            #     print(len(p[keep_indices]))
-            #     print(len(p[~keep_indices]))
-            #     print(len(a))
-            # prop_w_bbox.append(a)
-
-        # data_loader_test = bbox_adaptor.prepare_test_data(flatten(prop_w_bbox_fg), crop_img_dir=crop_img_dir)
-        # predictions = bbox_adaptor.predict(data_loader_test)
-        # # for p in prop_w_bbox:
-        # for p in prop_w_bbox_fg:
-        #     p.pred_boxes = np.array([predictions.popleft() for _ in range(len(p))])
-
-        # if not remove_bg:
-        #     prop_w_bbox += prop_w_bbox_fg
-        #     prop_w_bbox += prop_w_bbox_bg
-        # else:
-        #     prop_w_bbox += prop_w_bbox_fg
-
-        #     print("add remove bg>>>>>>>>>>>>>")
-        #     for p in prop:
-        #         keep_indices = (0 <= p.pred_classes) & (p.pred_classes < len(class_names))
-        #         prop_w_bbox.append(p[~keep_indices])
-        # print('flatten length', len(flatten(prop_w_bbox)))
-        # print('fg length', len(flatten(prop_w_bbox_fg)))
-        # print('bg length', len(flatten(prop_w_bbox_bg)))
-        # print('mix length', len(flatten(prop_w_bbox_mix)))
-        # print('ext length', len(flatten(prop_w_bbox_ext)))
-        prop_w_bbox.flush()
-        # prop_w_bbox_ext.flush()
-    # return prop_w_bbox
-    return prop_w_bbox
-
-def generate_bounding_box_labels_bg(prop, bbox_adaptor, class_names, cache_filename, crop_img_dir=None, remove_bg=False, cascade_id=0):
-    """Generate bounding box labels for each proposals in `prop` and save them to the disk"""
-    prop_w_bbox = PersistentProposalList(cache_filename)
-    if True:
-        # remove (predicted) background proposals
-        for p in prop:
-            keep_indices = (0 <= p.pred_classes) & (p.pred_classes < len(class_names))
-            a = p[~keep_indices].extend(p[keep_indices])
-            prop_w_bbox.append(a)
-            # prop_w_bbox.append(p[~keep_indices])
-            # prop_w_bbox.append(p[keep_indices])
-
-        # data_loader_test = bbox_adaptor.prepare_test_data(flatten(prop_w_bbox), crop_img_dir=crop_img_dir)
+            # prop_w_bbox_fg.append(copy.deepcopy(p[keep_indices]))
+            # prop_w_bbox_bg.append(copy.deepcopy(p[~keep_indices]))
+            prop_w_bbox_fg.append(p[keep_indices])
+            prop_w_bbox_bg.append(p[~keep_indices])
+            indices_fg_ls.append(np.where(keep_indices)[0].tolist())
+            indices_bg_ls.append(np.where(~keep_indices)[0].tolist())
+            # lenght = len(p) // 2
+            # prop_w_bbox_fg.append(copy.deepcopy(p[:lenght]))
+            # prop_w_bbox_bg.append(copy.deepcopy(p[lenght:]))
+        data_loader_test = bbox_adaptor.prepare_test_data(flatten(prop_w_bbox_fg), crop_img_dir=crop_img_dir)
+        predictions = bbox_adaptor.predict(data_loader_test)
+        for p in prop_w_bbox_fg:
+            p.pred_boxes = np.array([predictions.popleft() for _ in range(len(p))])
+        print('generate_bounding_box_labels remove_bg: {}'.format(remove_bg))
+        if not remove_bg:
+            print('Do not remove bg ......')
+            for i in range(len(prop)):
+                p_fg = prop_w_bbox_fg[i]
+                p_bg = prop_w_bbox_bg[i]
+                p_fg.extend(p_bg)
+                # p = prop[i]
+                indices_fg = indices_fg_ls[i]
+                indices_bg = indices_bg_ls[i]
+                indices = indices_fg + indices_bg
+                new_indices = []
+                # print(indices)
+                for j in range(len(indices)):
+                    new_indices.append(indices.index(j))
+                # print(new_indices)
+                p_fg = p_fg[new_indices]
+                prop_w_bbox.append(p_fg)
+        else:
+            print('Remove bg ......')
+            for i in range(len(prop)):
+                p_fg = prop_w_bbox_fg[i]
+                prop_w_bbox.append(p_fg)
         prop_w_bbox.flush()
     return prop_w_bbox
 
@@ -354,9 +303,14 @@ def train(model, logger, cfg, args, args_cls, args_box):
     # generate proposals from detector
     classes = MetadataCatalog.get(args.targets[0]).thing_classes
     cache_proposal_root = os.path.join(cfg.OUTPUT_DIR, "cache", "proposal")
+
+    if not os.path.exists(cache_proposal_root):
+        os.makedirs(os.path.join(cfg.OUTPUT_DIR, "cache"), exist_ok=True)
+        os.symlink('/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_3/logs/faster_rcnn_R_101_C4/cityscapes2foggy_cascade/phase1/cache/proposal', 
+                    cache_proposal_root)
+
     prop_t_fg, prop_t_bg = generate_proposals(model, len(classes), args.targets, cache_proposal_root, cfg)
     prop_s_fg, prop_s_bg = generate_proposals(model, len(classes), args.sources, cache_proposal_root, cfg)
-    prop_t_fg_ori, prop_t_bg_ori = copy.deepcopy(prop_t_fg), copy.deepcopy(prop_t_bg)
     
     model = model.to(torch.device('cpu'))
 
@@ -366,56 +320,82 @@ def train(model, logger, cfg, args, args_cls, args_box):
     gt_pred_show_root = os.path.join(cfg.OUTPUT_DIR, "cache", "show_gt_pred")
     crop_proposal_save_root = os.path.join(cfg.OUTPUT_DIR, "cache", "crop_propals")
     source_crop_proposal_save_root = os.path.join(crop_proposal_save_root, 'source')
+    if not os.path.exists(source_crop_proposal_save_root):
+        os.makedirs(crop_proposal_save_root, exist_ok=True)
+        os.symlink('/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_3/logs/faster_rcnn_R_101_C4/cityscapes2foggy_cascade/phase1/cache/crop_propals/source', 
+                    source_crop_proposal_save_root)
     analyze_proposal(prop_s_fg + prop_s_bg, classes, show_save_dir=os.path.join(gt_pred_show_root, 'source'), 
                     crop_save_dir=source_crop_proposal_save_root, show_scale=0.6, show_flag=show_flag, crop_flag=crop_flag) 
+
     target_crop_proposal_save_root = os.path.join(crop_proposal_save_root, 'target_0')
+    if not os.path.exists(target_crop_proposal_save_root):
+        os.symlink('/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_3/logs/faster_rcnn_R_101_C4/cityscapes2foggy_cascade/phase1/cache/crop_propals/target_0', 
+                    target_crop_proposal_save_root)
     analyze_proposal(prop_t_fg + prop_t_bg, classes, show_save_dir=os.path.join(gt_pred_show_root, 'target'), 
                     crop_save_dir=target_crop_proposal_save_root, show_scale=0.6, show_flag=show_flag, crop_flag=crop_flag)
+    
+    prop_t_fg_category = None
+    prop_t_bg_category = None
 
+    cascade_flag_category = None
+    cascade_flag_bbox = None
+    # cascade_flag_category = [True, True, True]
+    # cascade_flag_bbox = [False, False, False]
 
+    if cascade_flag_category is None:
+        cascade_flag_category = [True for i in range(args.num_cascade)]
+    if cascade_flag_bbox is None:
+        cascade_flag_bbox = [True for i in range(args.num_cascade)]
+    assert args.num_cascade == len(cascade_flag_category), 'num_cascade {} not equals to cascade_flag_category {}'.format(args.num_cascade, len(cascade_flag_category))
+    assert args.num_cascade == len(cascade_flag_bbox), 'num_cascade {} not equals to cascade_flag_bbox {}'.format(args.num_cascade, len(cascade_flag_bbox))
 
     for cascade_id in range(args.num_cascade):
-        print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
+        print('\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
         print('>>>>>>>>>>> Cascade Phase {} >>>>>>>>>>>'.format(cascade_id))
-        print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
-
+        print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n')
 
         # target_crop_proposal_save_root = os.path.join(crop_proposal_save_root, 'target_{}'.format(cascade_id))
         # show_save_dir = os.path.join(gt_pred_show_root, 'target_{}'.format(cascade_id))
         # analyze_proposal(prop_t_fg + prop_t_bg, classes, show_save_dir=show_save_dir, 
         #                 crop_save_dir=target_crop_proposal_save_root, show_scale=0.6, show_flag=show_flag, crop_flag=crop_flag)
 
+        if cascade_flag_category[cascade_id]:
+            # train the category adaptor
+            category_adaptor = category_adaptation.CategoryAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "cls_{}".format(cascade_id)), args_cls)
+            
+            if cascade_id == 0:
+                category_adaptor.load_checkpoint()
+                data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg, 
+                                                                                crop_img_dir=target_crop_proposal_save_root)
+                category_adaptor.validate(data_loader_validation, category_adaptor.model, category_adaptor.class_names, category_adaptor.args)
+            else:
 
-        # train the category adaptor
-        category_adaptor = category_adaptation.CategoryAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "cls_{}".format(cascade_id)), args_cls)
-        # if not category_adaptor.load_checkpoint():
-        # if cascade_id == 0:
-        #     category_adaptor.load_checkpoint()
-        # else:
-        if True:
-            data_loader_source = category_adaptor.prepare_training_data(prop_s_fg + prop_s_bg, True, 
-                                                                        crop_img_dir=source_crop_proposal_save_root)
-            data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False,
-                                                                        crop_img_dir=target_crop_proposal_save_root)
-            data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg, 
+            # if not category_adaptor.load_checkpoint():
+            # if True:
+                data_loader_source = category_adaptor.prepare_training_data(prop_s_fg + prop_s_bg, True, 
+                                                                            crop_img_dir=source_crop_proposal_save_root)
+                data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False,
                                                                             crop_img_dir=target_crop_proposal_save_root)
-            category_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation)
+                data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg, 
+                                                                                crop_img_dir=target_crop_proposal_save_root)
+                category_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation)
 
-        # generate category labels for each proposals
-        cache_feedback_root = os.path.join(cfg.OUTPUT_DIR, "cache", "feedback")
-        prop_t_fg = generate_category_labels(
-            prop_t_fg, category_adaptor, os.path.join(cache_feedback_root, "{}_fg_{}.json".format(args.targets[0], cascade_id)), 
-            crop_img_dir=target_crop_proposal_save_root, cascade_id=cascade_id
-        )
-        prop_t_bg = generate_category_labels(
-            prop_t_bg, category_adaptor, os.path.join(cache_feedback_root, "{}_bg_{}.json".format(args.targets[0], cascade_id)), 
-            crop_img_dir=target_crop_proposal_save_root, cascade_id=cascade_id
-        )
-        category_adaptor.model.to(torch.device("cpu"))
+            # generate category labels for each proposals
+            cache_feedback_root = os.path.join(cfg.OUTPUT_DIR, "cache", "feedback")
+            prop_t_fg = generate_category_labels(
+                prop_t_fg, category_adaptor, os.path.join(cache_feedback_root, "{}_fg_{}.json".format(args.targets[0], cascade_id)), 
+                crop_img_dir=target_crop_proposal_save_root, cascade_id=cascade_id
+            )
+            prop_t_bg = generate_category_labels(
+                prop_t_bg, category_adaptor, os.path.join(cache_feedback_root, "{}_bg_{}.json".format(args.targets[0], cascade_id)), 
+                crop_img_dir=target_crop_proposal_save_root, cascade_id=cascade_id
+            )
+            prop_t_fg_category = copy.deepcopy(prop_t_fg)
+            prop_t_bg_category = copy.deepcopy(prop_t_bg)
+            category_adaptor.model.to(torch.device("cpu"))
 
 
-
-        if args.bbox_refine:
+        if args.bbox_refine and cascade_flag_bbox[cascade_id]:
             # train the bbox adaptor
             bbox_adaptor = bbox_adaptation.BoundingBoxAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "bbox_{}".format(cascade_id)), args_box)
             # if not bbox_adaptor.load_checkpoint():
@@ -423,14 +403,20 @@ def train(model, logger, cfg, args, args_cls, args_box):
                 data_loader_source = bbox_adaptor.prepare_training_data(prop_s_fg, True, crop_img_dir=source_crop_proposal_save_root)
                 data_loader_target = bbox_adaptor.prepare_training_data(prop_t_fg, False, crop_img_dir=target_crop_proposal_save_root)
                 data_loader_validation = bbox_adaptor.prepare_validation_data(prop_t_fg, crop_img_dir=target_crop_proposal_save_root)
-                # bbox_adaptor.validate_baseline(data_loader_validation)
-                # bbox_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation)
+                # data_loader_validation_source = bbox_adaptor.prepare_validation_data_source(prop_s_fg, crop_img_dir=source_crop_proposal_save_root)
+                print('data_loader_validation baseline: ......')
+                bbox_adaptor.validate_baseline(data_loader_validation)
+                # print('data_loader_validation_source baseline: ......')
+                # bbox_adaptor.validate_baseline(data_loader_validation_source)
+                bbox_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation)
+                # bbox_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, data_loader_validation_source)
 
             # generate bounding box labels for each proposals
             cache_feedback_root = os.path.join(cfg.OUTPUT_DIR, "cache", "feedback_bbox")
             
             remove_bg_flag = cascade_id == (args.num_cascade - 1)
-            ## prop_t_fg_refined = generate_bounding_box_labels(
+            
+            # prop_t_fg_refined = generate_bounding_box_labels(
             prop_t_fg = generate_bounding_box_labels(
                 prop_t_fg, bbox_adaptor, classes, os.path.join(cache_feedback_root, "{}_fg_{}.json".format(args.targets[0], cascade_id)), 
                 crop_img_dir=target_crop_proposal_save_root, remove_bg=remove_bg_flag, cascade_id=cascade_id
@@ -442,11 +428,8 @@ def train(model, logger, cfg, args, args_cls, args_box):
             )
             bbox_adaptor.model.to(torch.device("cpu"))
 
-
-    prop_t_fg_ori += prop_t_fg
-    prop_t_bg_ori += prop_t_bg
-    prop_t_fg = prop_t_fg_ori
-    prop_t_bg = prop_t_bg_ori
+    prop_t_fg += prop_t_fg_category
+    prop_t_bg += prop_t_bg_category
 
     if args.reduce_proposals:
         # remove proposals
@@ -558,7 +541,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(add_help=True)
 
-    parser.add_argument('--num-cascade', default=5, type=int,
+    parser.add_argument('--num-cascade', default=1, type=int,
                         help='num-cascade')
 
     # dataset parameters

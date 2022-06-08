@@ -214,6 +214,27 @@ class BoundingBoxAdaptor:
         dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
                                 shuffle=False, num_workers=self.args.workers, drop_last=False)
         return dataloader
+    
+    def prepare_validation_data_source(self, proposal_list: PersistentProposalList, crop_img_dir=None):
+        normalize = T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        transform = T.Compose([
+            T.Resize((self.args.resize_size, self.args.resize_size)),
+            T.ToTensor(),
+            normalize
+        ])
+
+        # remove (predicted) background proposals
+        filtered_proposals_list = []
+        for proposals in proposal_list:
+            keep_indices = (0 <= proposals.gt_classes) & (proposals.gt_classes < len(self.class_names))
+            # keep_indices = (0 <= proposals.pred_classes) & (proposals.pred_classes < len(self.class_names))
+            filtered_proposals_list.append(proposals[keep_indices])
+
+        filtered_proposals_list = flatten(filtered_proposals_list, self.args.max_val)
+        dataset = ProposalDataset(filtered_proposals_list, transform, crop_func=ExpandCrop(self.args.expand), crop_img_dir=crop_img_dir)
+        dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
+                                shuffle=False, num_workers=self.args.workers, drop_last=False)
+        return dataloader
 
     def prepare_test_data(self, proposal_list: PersistentProposalList, crop_img_dir=None):
         normalize = T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -297,7 +318,7 @@ class BoundingBoxAdaptor:
 
         return ious.avg
 
-    def fit(self, data_loader_source, data_loader_target, data_loader_validation=None):
+    def fit(self, data_loader_source, data_loader_target, data_loader_validation=None, data_loader_validation_source=None):
         """When no labels exists on target domain, please set data_loader_validation=None"""
         args = self.args
         print(args)
@@ -384,8 +405,13 @@ class BoundingBoxAdaptor:
 
             # evaluate on validation set
             if data_loader_validation is not None:
+                print('data_loader_validation ......')
                 iou = self.validate(data_loader_validation, model, box_transform, args)
                 best_iou = max(iou, best_iou)
+            if data_loader_validation_source is not None:
+                print('data_loader_validation_source ......')
+                iou = self.validate(data_loader_validation_source, model, box_transform, args)
+                # best_iou = max(iou, best_iou)
 
         # training on both domains
         model = self.model
@@ -468,13 +494,17 @@ class BoundingBoxAdaptor:
 
             # evaluate on validation set
             if data_loader_validation is not None:
+                print('data_loader_validation ......')
                 iou = self.validate(data_loader_validation, model, box_transform, args)
                 best_iou = max(iou, best_iou)
+            if data_loader_validation_source is not None:
+                print('data_loader_validation_source ......')
+                iou = self.validate(data_loader_validation_source, model, box_transform, args)
 
             # save checkpoint
             torch.save(model.state_dict(), self.logger.get_checkpoint_path('latest'))
 
-        print("best_iou = {:3.1f}".format(best_iou))
+        print("best_iou = {:3.3f}".format(best_iou))
 
         self.logger.logger.flush()
 
@@ -516,7 +546,7 @@ class BoundingBoxAdaptor:
         parser.add_argument('--momentum', default=0.9, type=float, metavar='M', help='momentum')
         parser.add_argument('--workers-b', default=4, type=int, metavar='N',
                             help='number of data loading workers (default: 2)')
-        parser.add_argument('--epochs-b', default=1, type=int, metavar='N',
+        parser.add_argument('--epochs-b', default=2, type=int, metavar='N',
                             help='number of total epochs to run') # 2
         parser.add_argument('--pretrain-lr-b', default=0.001, type=float,
                             metavar='LR', help='initial learning rate')
@@ -524,9 +554,9 @@ class BoundingBoxAdaptor:
         parser.add_argument('--pretrain-lr-decay-b', default=0.75, type=float, help='parameter for lr scheduler')
         parser.add_argument('--pretrain-weight-decay-b', default=1e-3, type=float,
                             metavar='W', help='weight decay (default: 1e-3)')
-        parser.add_argument('--pretrain-epochs-b', default=1, type=int, metavar='N',
+        parser.add_argument('--pretrain-epochs-b', default=10, type=int, metavar='N',
                             help='number of total epochs to run')   # 10
-        parser.add_argument('--iters-per-epoch-b', default=300, type=int,
+        parser.add_argument('--iters-per-epoch-b', default=1000, type=int,
                             help='Number of iterations per epoch') # 1000
         parser.add_argument('--print-freq-b', default=100, type=int,
                             metavar='N', help='print frequency (default: 100)')

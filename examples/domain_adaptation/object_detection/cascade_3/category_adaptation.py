@@ -321,7 +321,8 @@ class CategoryAdaptor:
         # switch to evaluate mode
         self.model.eval()
         predictions = deque()
-
+        scores = deque()
+        sm = nn.Softmax(dim=1)
         with torch.no_grad():
             for images, _ in tqdm.tqdm(data_loader):
                 images = images.to(device)
@@ -329,9 +330,12 @@ class CategoryAdaptor:
                 # compute output
                 output = self.model(images)
                 prediction = output.argmax(-1).cpu().numpy().tolist()
+                score = sm(output).max(-1)[0].cpu().numpy().tolist()
                 for p in prediction:
                     predictions.append(p)
-        return predictions
+                for s in score:
+                    scores.append(s)
+        return predictions, scores
 
     @staticmethod
     def validate(val_loader, model, class_names, args) -> float:
@@ -408,7 +412,7 @@ class CategoryAdaptor:
         parser.add_argument('--epsilon-c', default=0.01, type=float,
                             help='epsilon hyper-parameter in Robust Cross Entropy')
         # training parameters
-        parser.add_argument('--batch-size-c', default=96, type=int,
+        parser.add_argument('--batch-size-c', default=64, type=int,
                             metavar='N',
                             help='mini-batch size (default: 64)')   # 64
         parser.add_argument('--learning-rate-c', default=0.01, type=float,
@@ -421,9 +425,9 @@ class CategoryAdaptor:
                             dest='weight_decay')
         parser.add_argument('--workers-c', default=4, type=int, metavar='N',
                             help='number of data loading workers (default: 2)')
-        parser.add_argument('--epochs-c', default=1, type=int, metavar='N',
+        parser.add_argument('--epochs-c', default=10, type=int, metavar='N',
                             help='number of total epochs to run')   # 10
-        parser.add_argument('--iters-per-epoch-c', default=500, type=int,
+        parser.add_argument('--iters-per-epoch-c', default=600, type=int,
                             help='Number of iterations per epoch') # 1000
         parser.add_argument('--print-freq-c', default=100, type=int,
                             metavar='N', help='print frequency (default: 100)')
