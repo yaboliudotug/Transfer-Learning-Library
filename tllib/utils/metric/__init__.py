@@ -126,11 +126,18 @@ class ConfusionMatrix(object):
     def format(self, classes: list):
         """Get the accuracy and IoU for each class in the table format"""
         acc_global, acc, recall, iu = self.compute()
+        fg_acc = acc[:-1].mean().item() * 100
+        bg_acc = acc[-1].item() * 100
+        fg_recall = recall[:-1].mean().item() * 100
+        bg_recall = recall[-1].item() * 100
+        fg_iu = iu[:-1].mean().item() * 100
+        bg_iu = iu[-1].mean().item() * 100
 
         table = prettytable.PrettyTable(["class", "acc", "recall", "iou"])
         for i, class_name, per_acc, per_recall, per_iu in zip(range(len(classes)), classes, (acc * 100).tolist(), (recall * 100).tolist(), (iu * 100).tolist()):
             table.add_row([class_name, per_acc, per_recall, per_iu])
 
-        return 'global correct: {:.1f}\nmean correct:{:.1f}\nmean recall:{:.1f}\nmean IoU: {:.1f}\n{}'.format(
-            acc_global.item() * 100, acc.mean().item() * 100, recall.mean().item() * 100, iu.mean().item() * 100, table.get_string())
+        return 'global correct: {:.1f}\nmean correct:{:.1f}\nmean recall:{:.1f}\nmean IoU: {:.1f}\nfg_acc: {:.1f} fg_recall: {:.1f} fg_iou: {:.1f}\nbg_acc: {:.1f} bg_recall: {:.1f} bg_iou: {:.1f}\n{}\n'. \
+                format(acc_global.item() * 100, acc.mean().item() * 100, recall.mean().item() * 100, iu.mean().item() * 100, 
+                fg_acc, fg_recall, fg_iu, bg_acc, bg_recall, bg_iu, table.get_string())
 

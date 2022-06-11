@@ -391,7 +391,12 @@ class CategoryAdaptor:
         parser.add_argument('--ignored-ious-c', type=float, nargs='+', default=(0.4, 0.5),
                             help='the iou threshold for ignored boxes')
         # model parameters
-        parser.add_argument('--arch-c', metavar='ARCH', default='resnet101',
+        # parser.add_argument('--arch-c', metavar='ARCH', default='resnet101',
+        #                     choices=utils.get_model_names(),
+        #                     help='backbone architecture: ' +
+        #                          ' | '.join(utils.get_model_names()) +
+        #                          ' (default: resnet101)')
+        parser.add_argument('--arch-c', metavar='ARCH', default='resnet50',
                             choices=utils.get_model_names(),
                             help='backbone architecture: ' +
                                  ' | '.join(utils.get_model_names()) +

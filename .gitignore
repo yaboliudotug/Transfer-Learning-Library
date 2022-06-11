@@ -138,3 +138,4 @@ examples/domain_adaptation/object_detection/d_adapt/logs/*
 examples/domain_adaptation/object_detection/cascade_adapt/logs/*
 examples/domain_adaptation/object_detection/cascade_2/logs/*
 examples/domain_adaptation/object_detection/cascade_3/logs/*
+examples/domain_adaptation/object_detection/cascade_4/logs/*

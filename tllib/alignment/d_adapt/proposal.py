@@ -30,6 +30,7 @@ from detectron2.evaluation.evaluator import DatasetEvaluator
 from detectron2.data.dataset_mapper import DatasetMapper
 import detectron2.data.detection_utils as utils
 import detectron2.data.transforms as T
+from detectron2.structures import Boxes
 
 _EXIF_ORIENT = 274  # exif 'Orientation' tag
 def _apply_exif_orientation(image):
@@ -203,17 +204,53 @@ class ProposalGenerator(DatasetEvaluator):
         pred_scores = output_instance.scores
         pred_classes = output_instance.pred_classes
         
-        # pred_ids = np.array(list(range(len(pred_classes))))
+        pred_boxes_np = pred_boxes.tensor.numpy()
+        pred_classes_np = pred_classes.numpy()
+        pred_scores_np = pred_scores.numpy()
+
+        filter_bboxs = False
+        min_bbox_length = 12
+        if filter_bboxs:
+            pred_boxes_ls = pred_boxes_np.tolist()
+            pred_classes_ls = pred_classes_np.tolist()
+            pred_scores_ls = pred_scores_np.tolist()
+            pred_boxes_ls_new = []
+            pred_classes_ls_new = []
+            pred_scores_ls_new = []
+            for i in range(len(pred_boxes_ls)):
+                x1, y1, x2, y2 = pred_boxes_ls[i]
+                if abs(x2 - x1) < min_bbox_length or abs(y2 - y1) < min_bbox_length:
+                    continue
+                pred_boxes_ls_new.append([x1, y1, x2, y2])
+                pred_classes_ls_new.append(pred_classes_ls[i])
+                pred_scores_ls_new.append(pred_scores_ls[i])
+            pred_boxes_np = np.array(pred_boxes_ls_new)
+            pred_classes_np = np.array(pred_classes_ls_new)
+            pred_scores_np = np.array(pred_scores_ls_new)
+            
         proposal = Proposal(
             image_id=inputs[0]['image_id'],
             filename=filename,
-            pred_boxes=pred_boxes.tensor.numpy(),
-            pred_classes=pred_classes.numpy(),
-            pred_scores=pred_scores.numpy(),
+            pred_boxes=pred_boxes_np,
+            pred_classes=pred_classes_np,
+            pred_scores=pred_scores_np,
             height = height,
             width = width,
             fb_set = type
         )
+        pred_boxes = Boxes(pred_boxes_np)
+
+
+        # proposal = Proposal(
+        #     image_id=inputs[0]['image_id'],
+        #     filename=filename,
+        #     pred_boxes=pred_boxes.tensor.numpy(),
+        #     pred_classes=pred_classes.numpy(),
+        #     pred_scores=pred_scores.numpy(),
+        #     height = height,
+        #     width = width,
+        #     fb_set = type
+        # )
 
         if hasattr(input_instance, 'gt_boxes'):
             gt_boxes = input_instance.gt_boxes
@@ -523,6 +560,7 @@ class ProposalDataset(datasets.VisionDataset):
         test_dir = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_adapt/test_imgs'
 
         img_crop, img = None, None
+        # self.crop_img_dir = None
         # print(self.crop_img_dir)
         if self.crop_img_dir is not None:
             pred_id = proposal.pred_ids
