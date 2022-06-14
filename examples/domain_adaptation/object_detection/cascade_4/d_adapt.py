@@ -36,7 +36,7 @@ from detectron2.evaluation import inference_on_dataset
 
 sys.path.append('../../../..')
 import tllib.alignment.d_adapt.modeling.meta_arch as models
-from tllib.alignment.d_adapt.proposal import ProposalGenerator, ProposalMapper, PersistentProposalList, flatten
+from tllib.alignment.d_adapt.proposal import ProposalGenerator, ProposalMapper, PersistentProposalList, flatten, update_proposal
 from tllib.alignment.d_adapt.feedback import get_detection_dataset_dicts, DatasetMapper
 
 sys.path.append('..')
@@ -354,15 +354,20 @@ def train(model, logger, cfg, args, args_cls, args_box):
 
     cascade_flag_category = [True if args.cascade_flag_category[i] == '1' else False for i in range(len(args.cascade_flag_category))]
     cascade_flag_bbox = [True if args.cascade_flag_bbox[i] == '1' else False for i in range(len(args.cascade_flag_bbox))]
+    ignored_scores_ls = eval(args.ignored_scores_ls)
+    ignored_ious_ls = eval(args.ignored_ious_ls)
     assert args.num_cascade == len(cascade_flag_category), 'num_cascade {} not equals to cascade_flag_category {}'.format(args.num_cascade, len(cascade_flag_category))
     assert args.num_cascade == len(cascade_flag_bbox), 'num_cascade {} not equals to cascade_flag_bbox {}'.format(args.num_cascade, len(cascade_flag_bbox))
+    assert args.num_cascade == len(ignored_scores_ls), 'num_cascade {} not equals to ignored_scores_ls {}'.format(args.num_cascade, len(ignored_scores_ls))
+    assert args.num_cascade == len(ignored_ious_ls), 'num_cascade {} not equals to ignored_ious_ls {}'.format(args.num_cascade, len(ignored_ious_ls))
+
 
     for cascade_id in range(args.num_cascade):
         print('\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
         print('>>>>>>>>>>> Cascade Phase {} >>>>>>>>>>>'.format(cascade_id))
         print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n')
 
-        if args.update_proposal:
+        if args.update_cache:
             if cascade_id != 0:
                 crop_proposal_save_root = os.path.join(cfg.OUTPUT_DIR, "cache", "crop_propals_update")
                 if not os.path.exists(crop_proposal_save_root):
@@ -375,6 +380,12 @@ def train(model, logger, cfg, args, args_cls, args_box):
         if cascade_flag_category[cascade_id]:
             # train the category adaptor
             category_adaptor = category_adaptation.CategoryAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "cls_{}".format(cascade_id)), args_cls)
+            if args.update_proposal:
+                print('update proposal for category at cascade_{}: ignore_scores {}, ignore_ious {}'.format(cascade_id, ignored_scores_ls[cascade_id], ignored_ious_ls[cascade_id]))
+                prop_s_fg = update_proposal(prop_s_fg, len(classes), ignored_ious_ls[cascade_id])
+                prop_s_bg = update_proposal(prop_s_bg, len(classes), ignored_ious_ls[cascade_id])
+                prop_t_fg = update_proposal(prop_t_fg, len(classes), ignored_ious_ls[cascade_id])
+                prop_t_bg = update_proposal(prop_t_bg, len(classes), ignored_ious_ls[cascade_id])
             
             # if cascade_id == 0:
             #     category_adaptor.load_checkpoint()
@@ -411,6 +422,13 @@ def train(model, logger, cfg, args, args_cls, args_box):
         if args.bbox_refine and cascade_flag_bbox[cascade_id]:
             # train the bbox adaptor
             bbox_adaptor = bbox_adaptation.BoundingBoxAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "bbox_{}".format(cascade_id)), args_box)
+            if args.update_proposal:
+                print('update proposal for bbox at cascade_{}: ignore_scores {}, ignore_ious {}'.format(cascade_id, ignored_scores_ls[cascade_id], ignored_ious_ls[cascade_id]))
+                prop_s_fg = update_proposal(prop_s_fg, len(classes), ignored_ious_ls[cascade_id])
+                prop_s_bg = update_proposal(prop_s_bg, len(classes), ignored_ious_ls[cascade_id])
+                prop_t_fg = update_proposal(prop_t_fg, len(classes), ignored_ious_ls[cascade_id])
+                prop_t_bg = update_proposal(prop_t_bg, len(classes), ignored_ious_ls[cascade_id])
+            
             if not bbox_adaptor.load_checkpoint():
             # if True:
                 data_loader_source = bbox_adaptor.prepare_training_data(prop_s_fg, True, crop_img_dir=source_crop_proposal_save_root)
@@ -561,9 +579,16 @@ if __name__ == "__main__":
     parser.add_argument('--cascade-flag-bbox', default='1', type=str,
                         help='num-cascade')
 
+    parser.add_argument('--ignored-scores-ls', type=str, default='[[0.05, 0.5]]')
+    parser.add_argument('--ignored-ious-ls', type=str, default='[[0.4, 0.5]]')
+    # parser.add_argument('--ignored-scores-ls', type=float, nargs='+', default=[[0.05, 0.3]])
+    # parser.add_argument('--ignored-ious-ls', type=float, nargs='+', default=[[0.4, 0.5]])
+
     parser.add_argument('--use-pre-cache', default=0, type=int,
                         help='pre cache')
     parser.add_argument('--update-score', default=0, type=int,
+                        help='pre cache')
+    parser.add_argument('--update-cache', default=0, type=int,
                         help='pre cache')
     parser.add_argument('--update-proposal', default=0, type=int,
                         help='pre cache')

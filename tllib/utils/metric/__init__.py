@@ -91,8 +91,10 @@ class ConfusionMatrix(object):
         """compute global accuracy, per-class accuracy and per-class IoU"""
         h = self.mat.float()
         acc_global = torch.diag(h).sum() / h.sum()
-        acc = torch.diag(h) / h.sum(1)
-        recall = torch.diag(h) / h.sum(0)
+        # acc = torch.diag(h) / h.sum(1)
+        # recall = torch.diag(h) / h.sum(0)
+        recall = torch.diag(h) / h.sum(1)
+        acc = torch.diag(h) / h.sum(0)
         iu = torch.diag(h) / (h.sum(1) + h.sum(0) - torch.diag(h))
         return acc_global, acc, recall, iu
 
@@ -133,11 +135,17 @@ class ConfusionMatrix(object):
         fg_iu = iu[:-1].mean().item() * 100
         bg_iu = iu[-1].mean().item() * 100
 
+        h = self.mat.float()
+        acc_global_fg = torch.diag(h)[:-1].sum() / h[:-1, :-1].sum()
+        recall_global_fg = torch.diag(h)[:-1].sum() / h.sum(1)[:-1].sum()
+        iu_global_fg = torch.diag(h)[:-1].sum() / (h.sum(1)[:-1].sum() + h.sum(0)[:-1].sum() - torch.diag(h)[:-1].sum())
+
         table = prettytable.PrettyTable(["class", "acc", "recall", "iou"])
         for i, class_name, per_acc, per_recall, per_iu in zip(range(len(classes)), classes, (acc * 100).tolist(), (recall * 100).tolist(), (iu * 100).tolist()):
             table.add_row([class_name, per_acc, per_recall, per_iu])
 
-        return 'global correct: {:.1f}\nmean correct:{:.1f}\nmean recall:{:.1f}\nmean IoU: {:.1f}\nfg_acc: {:.1f} fg_recall: {:.1f} fg_iou: {:.1f}\nbg_acc: {:.1f} bg_recall: {:.1f} bg_iou: {:.1f}\n{}\n'. \
-                format(acc_global.item() * 100, acc.mean().item() * 100, recall.mean().item() * 100, iu.mean().item() * 100, 
+        return 'global correct: {:.1f}\nglobal correct fg:{:.1f} global recall fg:{:.1f} global IoU fb: {:.1f}\nmean correct:{:.1f} mean recall:{:.1f} mean IoU: {:.1f}\nfg_acc: {:.1f} fg_recall: {:.1f} fg_iou: {:.1f}\nbg_acc: {:.1f} bg_recall: {:.1f} bg_iou: {:.1f}\n{}\n'. \
+                format(acc_global.item() * 100, acc_global_fg.mean().item() * 100, recall_global_fg.mean().item() * 100, iu_global_fg.mean().item() * 100, 
+                acc.mean().item() * 100, recall.mean().item() * 100, iu.mean().item() * 100, 
                 fg_acc, fg_recall, fg_iu, bg_acc, bg_recall, bg_iu, table.get_string())
 

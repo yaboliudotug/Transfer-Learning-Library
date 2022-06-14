@@ -113,15 +113,19 @@ class CategoryAdaptor:
         else:
             return False
 
-    def prepare_training_data(self, proposal_list: List[Proposal], labeled=True, crop_img_dir=None):
+    def prepare_training_data(self, proposal_list: List[Proposal], labeled=True, crop_img_dir=None, ignored_scores=None, ignored_ious=None):
+        if ignored_scores is None:
+            ignored_scores = self.args.ignored_scores
+        if ignored_ious is None:
+            ignored_ious = self.args.ignored_ious
         if not labeled:
             # remove proposals with confidence score between (ignored_scores[0], ignored_scores[1])
             filtered_proposals_list = []
-            assert len(self.args.ignored_scores) == 2 and self.args.ignored_scores[0] <= self.args.ignored_scores[1], \
+            assert len(ignored_scores) == 2 and ignored_scores[0] <= ignored_scores[1], \
                 "Please provide a range for ignored_scores!"
             for proposals in proposal_list:
-                keep_indices = ~((self.args.ignored_scores[0] < proposals.pred_scores)
-                                 & (proposals.pred_scores < self.args.ignored_scores[1]))
+                keep_indices = ~((ignored_scores[0] < proposals.pred_scores)
+                                 & (proposals.pred_scores < ignored_scores[1]))
                 filtered_proposals_list.append(proposals[keep_indices])
 
             # calculate confidence threshold for each cateogry on the target domain
@@ -133,8 +137,8 @@ class CategoryAdaptor:
             filtered_proposals_list = []
             for proposals in proposal_list:
                 keep_indices = (proposals.gt_classes != -1) & \
-                               ~((self.args.ignored_ious[0] < proposals.gt_ious) &
-                                 (proposals.gt_ious < self.args.ignored_ious[1]))
+                               ~((ignored_ious[0] < proposals.gt_ious) &
+                                 (proposals.gt_ious < ignored_ious[1]))
                 filtered_proposals_list.append(proposals[keep_indices])
 
         filtered_proposals_list = flatten(filtered_proposals_list, self.args.max_train)
@@ -158,7 +162,7 @@ class CategoryAdaptor:
         """call this function if you have labeled data for validation"""
         normalize = T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         transform = T.Compose([
-            ResizeImage(self.args.resize_size),
+            ResizeImage(self.args.resize_size), 
             T.ToTensor(),
             normalize
         ])
@@ -376,6 +380,7 @@ class CategoryAdaptor:
 
             print(' * Acc@1 {top1.avg:.3f}'.format(top1=top1))
             print(confmat.format(class_names+["bg"]))
+            print(confmat.mat)
 
         return top1.avg
 
@@ -390,13 +395,7 @@ class CategoryAdaptor:
         parser.add_argument('--max-val-c', type=int, default=2)
         parser.add_argument('--ignored-ious-c', type=float, nargs='+', default=(0.4, 0.5),
                             help='the iou threshold for ignored boxes')
-        # model parameters
-        # parser.add_argument('--arch-c', metavar='ARCH', default='resnet101',
-        #                     choices=utils.get_model_names(),
-        #                     help='backbone architecture: ' +
-        #                          ' | '.join(utils.get_model_names()) +
-        #                          ' (default: resnet101)')
-        parser.add_argument('--arch-c', metavar='ARCH', default='resnet50',
+        parser.add_argument('--arch-c', metavar='ARCH', default='resnet101',
                             choices=utils.get_model_names(),
                             help='backbone architecture: ' +
                                  ' | '.join(utils.get_model_names()) +

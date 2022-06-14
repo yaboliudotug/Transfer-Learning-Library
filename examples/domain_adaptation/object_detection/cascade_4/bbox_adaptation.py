@@ -164,7 +164,7 @@ class BoundingBoxAdaptor:
         else:
             return False
 
-    def prepare_training_data(self, proposal_list: PersistentProposalList, labeled=True, crop_img_dir=None):
+    def prepare_training_data(self, proposal_list: PersistentProposalList, labeled=True, crop_img_dir=None, fg_iou_threshhold=0.3):
         if not labeled:
             # remove (predicted) background proposals
             filtered_proposals_list = []
@@ -175,7 +175,8 @@ class BoundingBoxAdaptor:
             # remove proposals with low IoU
             filtered_proposals_list = []
             for proposals in proposal_list:
-                keep_indices = proposals.gt_ious > 0.3
+                # keep_indices = proposals.gt_ious > 0.3
+                keep_indices = proposals.gt_ious > fg_iou_threshhold
                 filtered_proposals_list.append(proposals[keep_indices])
 
         filtered_proposals_list = flatten(filtered_proposals_list, self.args.max_train)
@@ -521,6 +522,7 @@ class BoundingBoxAdaptor:
                                  '(the crops of objects) and the the original predicted box.')
         # model parameters
         parser.add_argument('--arch-b', metavar='ARCH', default='resnet101',
+        # parser.add_argument('--arch-b', metavar='ARCH', default='resnet50',
                             choices=utils.get_model_names(),
                             help='backbone architecture: ' +
                                  ' | '.join(utils.get_model_names()) +

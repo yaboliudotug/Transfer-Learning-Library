@@ -291,6 +291,45 @@ class ProposalGenerator(DatasetEvaluator):
     def evaluate(self):
         return self.fg_proposal_list, self.bg_proposal_list
 
+def update_proposal(proposals, num_classes, iou_threshold=[0.03, 0.3]):
+    prop_new = PersistentProposalList()
+    for proposal in proposals:
+        pred_boxes_np, all_gt_boxes_np, all_gt_classes_np = proposal.pred_boxes, proposal.all_gt_boxes, proposal.all_gt_classes
+        pred_boxes, all_gt_boxes = Boxes(pred_boxes_np), Boxes(all_gt_boxes_np)
+        # print('>>>>>>')
+        # print(all_gt_classes_np)
+        gt_ious, gt_classes_idx = pairwise_iou(pred_boxes, all_gt_boxes).max(dim=1)
+        gt_classes = all_gt_classes_np[gt_classes_idx]
+        if gt_classes_idx.shape[0] == 1:
+            # print(gt_classes)
+            gt_classes = np.array([gt_classes])
+            # print(gt_classes)
+        # print(gt_ious)
+        # print(gt_classes_idx)
+        # print(gt_classes)
+        proposal.gt_fg_classes = copy.deepcopy(gt_classes)
+        # print(gt_ious <= iou_threshold[0])
+        # print(gt_classes)
+        # print(gt_classes.shape, gt_classes_idx.shape)
+        if gt_classes_idx.shape[0] == 1:
+            gt_classes[0] = num_classes
+        else:
+            gt_classes[gt_ious <= iou_threshold[0]] = num_classes  # background classes
+        # print('>>>>>>>>')
+        # print(gt_classes)
+        # print(type(gt_classes))
+        # print(a)
+        # print(gt_classes[a])
+        if gt_classes_idx.shape[0] == 1:
+            if (iou_threshold[0] < gt_ious) & (gt_ious <= iou_threshold[1])[0]:
+                gt_classes[0] = -1
+        else:
+            gt_classes[(iou_threshold[0] < gt_ious) & (gt_ious <= iou_threshold[1])] = -1  # ignore
+        proposal.gt_classes = gt_classes
+        proposal.gt_ious = gt_ious.numpy()
+        proposal.gt_boxes = all_gt_boxes[gt_classes_idx].tensor.numpy()
+        prop_new.append(proposal)
+    return prop_new
 
 class Proposal:
     """
