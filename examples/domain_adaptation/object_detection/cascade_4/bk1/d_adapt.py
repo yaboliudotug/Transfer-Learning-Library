@@ -305,11 +305,7 @@ def train(model, logger, cfg, args, args_cls, args_box):
     # generate proposals from detector
     classes = MetadataCatalog.get(args.targets[0]).thing_classes
     cache_proposal_root = os.path.join(cfg.OUTPUT_DIR, "cache", "proposal")
-
     pre_cache_root = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_3/logs/faster_rcnn_R_101_C4/cityscapes2foggy_ori_cache/phase1/cache'
-    # pre_cache_root = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_4/logs/faster_rcnn_R_101_C4/cityscapes2foggy/phase1/cache'
-    
-    
     if args.use_pre_cache:
         if not os.path.exists(cache_proposal_root):
             print('using pre cahce ......')

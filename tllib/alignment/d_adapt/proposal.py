@@ -291,10 +291,11 @@ class ProposalGenerator(DatasetEvaluator):
     def evaluate(self):
         return self.fg_proposal_list, self.bg_proposal_list
 
-def update_proposal(proposals, num_classes, iou_threshold=[0.03, 0.3]):
+def update_proposal0(proposals, num_classes, iou_threshold=[0.03, 0.3]):
     prop_new = PersistentProposalList()
     for proposal in proposals:
         pred_boxes_np, all_gt_boxes_np, all_gt_classes_np = proposal.pred_boxes, proposal.all_gt_boxes, proposal.all_gt_classes
+        # if pred_boxes_np.shape[0] == 0:
         pred_boxes, all_gt_boxes = Boxes(pred_boxes_np), Boxes(all_gt_boxes_np)
         # print('>>>>>>')
         # print(all_gt_classes_np)
@@ -330,6 +331,58 @@ def update_proposal(proposals, num_classes, iou_threshold=[0.03, 0.3]):
         proposal.gt_boxes = all_gt_boxes[gt_classes_idx].tensor.numpy()
         prop_new.append(proposal)
     return prop_new
+
+def update_proposal(proposals, num_classes, iou_threshold=[0.03, 0.3]):
+    prop_new = PersistentProposalList()
+    for proposal_ori in proposals:
+        proposal = copy.deepcopy(proposal_ori)
+        pred_boxes_np, all_gt_boxes_np, all_gt_classes_np = proposal.pred_boxes, proposal.all_gt_boxes, proposal.all_gt_classes
+        pred_boxes_Boxes, all_gt_boxes_Boxes, all_gt_classes = Boxes(pred_boxes_np), Boxes(all_gt_boxes_np), torch.from_numpy(all_gt_classes_np)
+        if pred_boxes_Boxes.tensor.shape[0] == 0 or all_gt_boxes_Boxes.tensor.shape[0] == 0:
+            prop_new.append(proposal)
+            continue
+        gt_ious, gt_classes_idx = pairwise_iou(pred_boxes_Boxes, all_gt_boxes_Boxes).max(dim=1)
+        gt_classes = all_gt_classes[gt_classes_idx]
+        proposal.gt_fg_classes = copy.deepcopy(gt_classes.numpy())
+        gt_classes[gt_ious <= iou_threshold[0]] = num_classes  # background classes
+        gt_classes[(iou_threshold[0] < gt_ious) & (gt_ious <= iou_threshold[1])] = -1  # ignore
+        proposal.gt_classes = gt_classes.numpy()
+        proposal.gt_ious = gt_ious.numpy()
+        proposal.gt_boxes = all_gt_boxes_Boxes[gt_classes_idx].tensor.numpy()
+        prop_new.append(proposal)
+    return prop_new
+
+def update_proposal_1(proposals, num_classes, iou_threshold=[0.03, 0.3]):
+    prop_new = PersistentProposalList()
+    for proposal_ori in proposals:
+        proposal = copy.deepcopy(proposal_ori)
+        pred_boxes_np, all_gt_boxes_np, all_gt_classes_np = proposal.pred_boxes, proposal.all_gt_boxes, proposal.all_gt_classes
+        gt_fg_classes_0, gt_classes_0, gt_ious_0, gt_boxes_0 = proposal.gt_fg_classes, proposal.gt_classes, proposal.gt_ious, proposal.gt_boxes
+        pred_boxes_Boxes, all_gt_boxes_Boxes, all_gt_classes = Boxes(pred_boxes_np), Boxes(all_gt_boxes_np), torch.from_numpy(all_gt_classes_np)
+        if pred_boxes_Boxes.tensor.shape[0] == 0 or all_gt_boxes_Boxes.tensor.shape[0] == 0:
+            prop_new.append(proposal)
+            continue
+        gt_ious, gt_classes_idx = pairwise_iou(pred_boxes_Boxes, all_gt_boxes_Boxes).max(dim=1)
+        gt_classes = all_gt_classes[gt_classes_idx]
+        proposal.gt_fg_classes = copy.deepcopy(gt_classes.numpy())
+        gt_classes[gt_ious <= iou_threshold[0]] = num_classes  # background classes
+        gt_classes[(iou_threshold[0] < gt_ious) & (gt_ious <= iou_threshold[1])] = -1  # ignore
+        proposal.gt_classes = gt_classes.numpy()
+        proposal.gt_ious = gt_ious.numpy()
+        proposal.gt_boxes = all_gt_boxes_Boxes[gt_classes_idx].tensor.numpy()
+        prop_new.append(proposal)
+
+        pred_boxes_np_1, gt_fg_classes, gt_classes, gt_ious, gt_boxes = proposal.pred_boxes, proposal.gt_fg_classes, proposal.gt_classes, proposal.gt_ious, proposal.gt_boxes
+
+        print('>>>>>>>>>')
+        # print(pred_boxes_np_1 == pred_boxes_np)
+        print(gt_fg_classes == gt_fg_classes_0)
+        print(gt_classes == gt_classes_0)
+        print(gt_ious == gt_ious_0)
+        # print(gt_boxes == gt_boxes_0)
+
+    return prop_new
+
 
 class Proposal:
     """
@@ -641,6 +694,7 @@ class ProposalDataset(datasets.VisionDataset):
             # img.save(os.path.join(test_dir, crop_img_name.split('.jpg')[0] + '_whole.jpg'))
             # print('proposal dataset time, read img:{:.3f}, crop img:{:.3f}'.format(time2 - time1, time3 - time2))
         time_end_read = time.time()
+        # print(crop_loaded_flag, time_end_read - time1)
         # print('proposal dataset time, read img:{:.3f}, read_mode:{}'.format(time_end_read - time_start_read, read_mode))
 
         # if img_crop and img:
