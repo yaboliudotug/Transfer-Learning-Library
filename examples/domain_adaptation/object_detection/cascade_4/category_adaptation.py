@@ -284,6 +284,9 @@ class CategoryAdaptor:
                 y_s, y_t = y.chunk(2, dim=0)
                 f_s, f_t = f.chunk(2, dim=0)
 
+                # y_s, f_s = model(x_s)
+                # y_t, f_t = model(x_t)
+
                 cls_loss = F.cross_entropy(y_s, gt_classes_s, ignore_index=-1)
                 cls_loss_t = RobustCrossEntropyLoss(ignore_index=-1, offset=args.epsilon)(y_t, pseudo_classes_t)
                 transfer_loss = domain_adv(y_s, f_s, y_t, f_t)

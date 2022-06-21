@@ -254,6 +254,36 @@ def generate_bounding_box_labels(prop, bbox_adaptor, class_names, cache_filename
         prop_w_bbox.flush()
     return prop_w_bbox
 
+def compare_proposals(proposal_list_a, proposal_list_b):
+    # print('comparing proposals')
+    for proposal_a, proposal_b in zip(proposal_list_a, proposal_list_b):
+        pred_boxes_a, gt_fg_classes_a, gt_classes_a, gt_ious_a, gt_boxes_a = proposal_a.pred_boxes, proposal_a.gt_fg_classes, proposal_a.gt_classes, proposal_a.gt_ious, proposal_a.gt_boxes
+        pred_boxes_b, gt_fg_classes_b, gt_classes_b, gt_ious_b, gt_boxes_b = proposal_b.pred_boxes, proposal_b.gt_fg_classes, proposal_b.gt_classes, proposal_b.gt_ious, proposal_b.gt_boxes
+
+        pred_boxes_diff = np.array((pred_boxes_a - pred_boxes_b)).sum()
+        gt_fg_classes_diff = np.array((gt_fg_classes_a - gt_fg_classes_b)).sum()
+        gt_classes_diff = np.array((gt_classes_a - gt_classes_b)).sum()
+        gt_ious_diff = np.array((gt_ious_a - gt_ious_b)).sum()
+        gt_boxes_diff = np.array((gt_boxes_a - gt_boxes_b)).sum()
+        # print(pred_boxes_diff, gt_fg_classes_diff, gt_classes_diff, gt_ious_diff, gt_boxes_diff)
+        if pred_boxes_diff != 0:
+            print('Diff in pred_boxes --------')
+            print(pred_boxes_a, pred_boxes_b)
+        if gt_fg_classes_diff != 0:
+            print('Diff in gt_fg_classes_diff --------')
+            print(gt_fg_classes_a, gt_fg_classes_b)
+        if gt_classes_diff != 0:
+            print('Diff in gt_classes_diff --------')
+            print(gt_classes_a, gt_classes_b)
+        if gt_ious_diff != 0:
+            print('Diff in gt_ious_diff --------')
+            print(gt_ious_a, gt_ious_b)
+        if gt_boxes_diff != 0:
+            print('Diff in gt_boxes_diff --------')
+            print(gt_boxes_a, gt_boxes_b)
+    print('finish comparing!')
+
+
 
 def train(model, logger, cfg, args, args_cls, args_box):
     model.train()
@@ -306,8 +336,8 @@ def train(model, logger, cfg, args, args_cls, args_box):
     classes = MetadataCatalog.get(args.targets[0]).thing_classes
     cache_proposal_root = os.path.join(cfg.OUTPUT_DIR, "cache", "proposal")
 
-    pre_cache_root = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_3/logs/faster_rcnn_R_101_C4/cityscapes2foggy_ori_cache/phase1/cache'
-    # pre_cache_root = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_4/logs/faster_rcnn_R_101_C4/cityscapes2foggy/phase1/cache'
+    # pre_cache_root = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_3/logs/faster_rcnn_R_101_C4/cityscapes2foggy_ori_cache/phase1/cache'
+    pre_cache_root = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_4/logs/faster_rcnn_R_101_C4/cityscapes2foggy/phase1/cache'
     
     
     if args.use_pre_cache:
@@ -384,22 +414,18 @@ def train(model, logger, cfg, args, args_cls, args_box):
         if cascade_flag_category[cascade_id]:
             # train the category adaptor
             category_adaptor = category_adaptation.CategoryAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "cls_{}".format(cascade_id)), args_cls)
-            if args.update_proposal:
+            if args.update_proposal and cascade_id == 0:
             # if True:
                 print('update proposal for category at cascade_{}: ignore_scores {}, ignore_ious {}'.format(cascade_id, ignored_scores_ls[cascade_id], ignored_ious_ls[cascade_id]))
-                prop_s_fg = update_proposal(prop_s_fg, len(classes), ignored_ious_ls[cascade_id])
-                prop_s_bg = update_proposal(prop_s_bg, len(classes), ignored_ious_ls[cascade_id])
-                prop_t_fg = update_proposal(prop_t_fg, len(classes), ignored_ious_ls[cascade_id])
-                prop_t_bg = update_proposal(prop_t_bg, len(classes), ignored_ious_ls[cascade_id])
-                # temp = []
-                # for pa, pb in zip(prop_s_bg, prop_s_bg_b):
-                #     temp.append((pa.gt_classes == pb.gt_classes).all())
-                #     temp.append((pa.gt_fg_classes == pb.gt_fg_classes).all())
-                #     temp.append((pa.gt_ious == pb.gt_ious).all())
-                #     temp.append((pa.gt_boxes == pb.gt_boxes).all())
-                #     temp.append((pa.pred_boxes == pb.pred_boxes).all())
-                
-                # print(np.array(temp).all())
+                prop_s_fg_update = update_proposal(prop_s_fg, len(classes), ignored_ious_ls[cascade_id])
+                prop_s_bg_update = update_proposal(prop_s_bg, len(classes), ignored_ious_ls[cascade_id])
+                prop_t_fg_update = update_proposal(prop_t_fg, len(classes), ignored_ious_ls[cascade_id])
+                prop_t_bg_update = update_proposal(prop_t_bg, len(classes), ignored_ious_ls[cascade_id])
+
+                compare_proposals(prop_s_fg, prop_s_fg_update)
+                compare_proposals(prop_s_bg, prop_s_bg_update)
+                compare_proposals(prop_t_fg, prop_t_fg_update)
+                compare_proposals(prop_t_bg, prop_t_bg_update)
             
             # if cascade_id == 0:
             #     category_adaptor.load_checkpoint()
