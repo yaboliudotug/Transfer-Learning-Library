@@ -140,3 +140,4 @@ examples/domain_adaptation/object_detection/cascade_2/logs/*
 examples/domain_adaptation/object_detection/cascade_3/logs/*
 examples/domain_adaptation/object_detection/cascade_4/logs/*
 examples/domain_adaptation/object_detection/cascade_5/logs/*
+examples/domain_adaptation/object_detection/cascade_6/logs/*

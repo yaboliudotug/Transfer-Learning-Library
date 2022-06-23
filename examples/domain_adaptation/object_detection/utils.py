@@ -105,13 +105,13 @@ class PascalVOCDetectionPerClassEvaluatorMAP(PascalVOCDetectionPerClassEvaluator
     Pascal VOC Matlab API, and should produce similar but not identical results to the
     official API.
     """
-    def process(self, inputs, outputs):
-        for input, output in zip(inputs, outputs):
-            image_id = input["image_id"]
-            instances = output["instances"].to(self._cpu_device)
-            boxes = instances.pred_boxes.tensor.numpy()
-            scores = instances.scores.tolist()
-            classes = instances.pred_classes.tolist()
+    def process(self, props):
+        # for input, output in zip(inputs, outputs):
+        for prop in props:
+            image_id = prop.image_id
+            boxes = prop.pred_boxes
+            scores = prop.pred_scores.tolist()
+            classes = prop.pred_classes.tolist()
             for box, score, cls in zip(boxes, scores, classes):
                 xmin, ymin, xmax, ymax = box
                 # The inverse of data loading logic in `datasets/pascal_voc.py`
@@ -120,7 +120,6 @@ class PascalVOCDetectionPerClassEvaluatorMAP(PascalVOCDetectionPerClassEvaluator
                 self._predictions[cls].append(
                     f"{image_id} {score:.3f} {xmin:.1f} {ymin:.1f} {xmax:.1f} {ymax:.1f}"
                 )
-
 
 
 def validate(model, logger, cfg, args):

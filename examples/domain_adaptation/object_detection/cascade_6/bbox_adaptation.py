@@ -164,7 +164,7 @@ class BoundingBoxAdaptor:
         else:
             return False
 
-    def prepare_training_data(self, proposal_list: PersistentProposalList, labeled=True, crop_img_dir=None, fg_iou_threshhold=0.3, pretrain=False):
+    def prepare_training_data(self, proposal_list: PersistentProposalList, labeled=True, crop_img_dir=None, fg_iou_threshhold=0.3):
         if not labeled:
             # remove (predicted) background proposals
             filtered_proposals_list = []
@@ -191,17 +191,11 @@ class BoundingBoxAdaptor:
         ])
 
         dataset = ProposalDataset(filtered_proposals_list, transform, crop_func=ExpandCrop(self.args.expand), crop_img_dir=crop_img_dir)
-        # dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
-        #                         shuffle=True, num_workers=self.args.workers, drop_last=True)
-        if pretrain:
-            batch_size = self.args.batch_size_pretrain
-        else:
-            batch_size = self.args.batch_size
-        dataloader = DataLoader(dataset, batch_size=batch_size,
+        dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
                                 shuffle=True, num_workers=self.args.workers, drop_last=True)
         return dataloader
 
-    def prepare_validation_data(self, proposal_list: PersistentProposalList, crop_img_dir=None, pretrain=False):
+    def prepare_validation_data(self, proposal_list: PersistentProposalList, crop_img_dir=None):
         normalize = T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         transform = T.Compose([
             T.Resize((self.args.resize_size, self.args.resize_size)),
@@ -218,13 +212,7 @@ class BoundingBoxAdaptor:
 
         filtered_proposals_list = flatten(filtered_proposals_list, self.args.max_val)
         dataset = ProposalDataset(filtered_proposals_list, transform, crop_func=ExpandCrop(self.args.expand), crop_img_dir=crop_img_dir)
-        # dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
-        #                         shuffle=False, num_workers=self.args.workers, drop_last=False)
-        if pretrain:
-            batch_size = self.args.batch_size_pretrain
-        else:
-            batch_size = self.args.batch_size
-        dataloader = DataLoader(dataset, batch_size=batch_size,
+        dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
                                 shuffle=False, num_workers=self.args.workers, drop_last=False)
         return dataloader
     
@@ -331,7 +319,7 @@ class BoundingBoxAdaptor:
 
         return ious.avg
 
-    def fit(self, data_loader_source_pretrain, data_loader_source, data_loader_target, data_loader_validation=None, data_loader_validation_source=None):
+    def fit(self, data_loader_source, data_loader_target, data_loader_validation=None, data_loader_validation_source=None):
         """When no labels exists on target domain, please set data_loader_validation=None"""
         args = self.args
         print(args)
@@ -347,7 +335,6 @@ class BoundingBoxAdaptor:
 
         cudnn.benchmark = True
 
-        iter_source_pretrain = ForeverDataIterator(data_loader_source_pretrain)
         iter_source = ForeverDataIterator(data_loader_source)
         iter_target = ForeverDataIterator(data_loader_target)
 
@@ -368,18 +355,14 @@ class BoundingBoxAdaptor:
         optimizer = Adam(model.get_parameters(), args.pretrain_lr, weight_decay=args.pretrain_weight_decay)
         lr_scheduler = LambdaLR(optimizer, lambda x: args.pretrain_lr * (1. + args.pretrain_lr_gamma * float(x)) ** (-args.pretrain_lr_decay))
 
-        for epoch in range(args.epochs_pretrain):
+        for epoch in range(args.pretrain_epochs):
             print("lr:", lr_scheduler.get_last_lr()[0])
             batch_time = AverageMeter('Time', ':3.1f')
             data_time = AverageMeter('Data', ':3.1f')
             losses = AverageMeter('Loss', ':3.2f')
             ious = AverageMeter("IoU", ":.4e")
-            # progress = ProgressMeter(
-            #     args.iters_per_epoch,
-            #     [batch_time, data_time, losses, ious],
-            #     prefix="Epoch: [{}]".format(epoch))
             progress = ProgressMeter(
-                args.iters_per_epoch_pretrain,
+                args.iters_per_epoch,
                 [batch_time, data_time, losses, ious],
                 prefix="Epoch: [{}]".format(epoch))
 
@@ -387,10 +370,8 @@ class BoundingBoxAdaptor:
             model.train()
 
             end = time.time()
-            # for i in range(args.iters_per_epoch):
-            for i in range(args.iters_per_epoch_pretrain):
-                # x_s, labels_s = next(iter_source)
-                x_s, labels_s = next(iter_source_pretrain)
+            for i in range(args.iters_per_epoch):
+                x_s, labels_s = next(iter_source)
                 x_s = x_s.to(device)
                 # bounding box offsets
                 delta_s = box_transform.box_transform.get_deltas(labels_s['pred_boxes'], labels_s['gt_boxes']).to(device).float()
@@ -559,22 +540,9 @@ class BoundingBoxAdaptor:
         parser.add_argument('--trade-off', default=0.1, type=float,
                             help='the trade-off hyper-parameter for transfer loss')
         # training parameters
-        parser.add_argument('--batch-size-b-pretrain', default=160, type=int,
+        parser.add_argument('--batch-size-b', default=32, type=int,
                             metavar='N',
-                            help='mini-batch size (default: 64)') # 32 128
-        parser.add_argument('--epochs-b-pretrain', default=10, type=int, metavar='N',
-                            help='number of total epochs to run')   # 10
-        parser.add_argument('--iters-per-epoch-b-pretrain', default=200, type=int,
-                            help='Number of iterations per epoch') # 1000 250
-
-        parser.add_argument('--batch-size-b', default=80, type=int,
-                            metavar='N',
-                            help='mini-batch size (default: 64)') # 32 128
-        parser.add_argument('--epochs-b', default=2, type=int, metavar='N',
-                            help='number of total epochs to run') # 2
-        parser.add_argument('--iters-per-epoch-b', default=400, type=int,
-                            help='Number of iterations per epoch') # 1000 250
-
+                            help='mini-batch size (default: 64)') # 32
         parser.add_argument('--lr-b', default=0.004, type=float,
                             metavar='LR', help='initial learning rate')
         parser.add_argument('--lr-gamma-b', default=0.0002, type=float, help='parameter for lr scheduler')
@@ -584,16 +552,19 @@ class BoundingBoxAdaptor:
         parser.add_argument('--momentum', default=0.9, type=float, metavar='M', help='momentum')
         parser.add_argument('--workers-b', default=4, type=int, metavar='N',
                             help='number of data loading workers (default: 2)')
-        
+        parser.add_argument('--epochs-b', default=2, type=int, metavar='N',
+                            help='number of total epochs to run') # 2
         parser.add_argument('--pretrain-lr-b', default=0.001, type=float,
                             metavar='LR', help='initial learning rate')
         parser.add_argument('--pretrain-lr-gamma-b', default=0.0002, type=float, help='parameter for lr scheduler')
         parser.add_argument('--pretrain-lr-decay-b', default=0.75, type=float, help='parameter for lr scheduler')
         parser.add_argument('--pretrain-weight-decay-b', default=1e-3, type=float,
                             metavar='W', help='weight decay (default: 1e-3)')
-        
-        
-        parser.add_argument('--print-freq-b', default=50, type=int,
+        parser.add_argument('--pretrain-epochs-b', default=10, type=int, metavar='N',
+                            help='number of total epochs to run')   # 10
+        parser.add_argument('--iters-per-epoch-b', default=1000, type=int,
+                            help='Number of iterations per epoch') # 1000
+        parser.add_argument('--print-freq-b', default=100, type=int,
                             metavar='N', help='print frequency (default: 100)')
         parser.add_argument('--seed-b', default=None, type=int,
                             help='seed for initializing training. ')

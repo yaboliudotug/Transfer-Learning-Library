@@ -20,6 +20,8 @@ import copy
 # import copy
 
 import torch
+import torch.multiprocessing
+torch.multiprocessing.set_sharing_strategy('file_system')
 from torch.nn.parallel import DistributedDataParallel
 from detectron2.engine import default_writers, launch
 from detectron2.checkpoint import DetectionCheckpointer, PeriodicCheckpointer
@@ -41,6 +43,7 @@ from tllib.alignment.d_adapt.feedback import get_detection_dataset_dicts, Datase
 
 sys.path.append('..')
 import utils
+from utils import PascalVOCDetectionPerClassEvaluatorMAP
 
 import category_adaptation
 import bbox_adaptation
@@ -347,8 +350,21 @@ def train(model, logger, cfg, args, args_cls, args_box):
             os.symlink(os.path.join(pre_cache_root, 'proposal'), cache_proposal_root)
 
     prop_t_fg, prop_t_bg = generate_proposals(model, len(classes), args.targets, cache_proposal_root, cfg)
-    prop_s_fg, prop_s_bg = generate_proposals(model, len(classes), args.sources, cache_proposal_root, cfg)
-    
+    prop_s_fg, prop_s_bg = generate_proposals(model, len(classes), args.sources, cache_proposal_root, cfg)    
+
+
+    map_evaluater_target = PascalVOCDetectionPerClassEvaluatorMAP(args.targets[0])
+    # map_evaluater_target.reset()
+    # map_evaluater_target.process(prop_t_fg + prop_t_bg)
+    # results = map_evaluater_target.evaluate()
+    # print(results)
+
+    map_evaluater_source = PascalVOCDetectionPerClassEvaluatorMAP(args.sources[0])
+    # map_evaluater_source.reset()
+    # map_evaluater_source.process(prop_s_fg + prop_s_bg)
+    # results = map_evaluater_source.evaluate()
+    # print(results)
+
     model = model.to(torch.device('cpu'))
 
 
@@ -358,19 +374,19 @@ def train(model, logger, cfg, args, args_cls, args_box):
     crop_proposal_save_root = os.path.join(cfg.OUTPUT_DIR, "cache", "crop_propals")
     source_crop_proposal_save_root = os.path.join(crop_proposal_save_root, 'source')
 
-    # if args.use_pre_cache:
-    #     if not os.path.exists(source_crop_proposal_save_root):
-    #         os.makedirs(crop_proposal_save_root, exist_ok=True)
-    #         os.symlink(os.path.join(pre_cache_root, 'crop_propals', 'source'), 
-    #                     source_crop_proposal_save_root)
+    if args.use_pre_crop:
+        if not os.path.exists(source_crop_proposal_save_root):
+            os.makedirs(crop_proposal_save_root, exist_ok=True)
+            os.symlink(os.path.join(pre_cache_root, 'crop_propals', 'source'), 
+                        source_crop_proposal_save_root)
     analyze_proposal(prop_s_fg + prop_s_bg, classes, show_save_dir=os.path.join(gt_pred_show_root, 'source'), 
                     crop_save_dir=source_crop_proposal_save_root, show_scale=0.6, show_flag=show_flag, crop_flag=crop_flag) 
 
     target_crop_proposal_save_root = os.path.join(crop_proposal_save_root, 'target_0')
-    # if args.use_pre_cache:
-    #     if not os.path.exists(target_crop_proposal_save_root):
-    #         os.symlink(os.path.join(pre_cache_root, 'crop_propals', 'target_0'), 
-    #                     target_crop_proposal_save_root)
+    if args.use_pre_crop:
+        if not os.path.exists(target_crop_proposal_save_root):
+            os.symlink(os.path.join(pre_cache_root, 'crop_propals', 'target_0'), 
+                        target_crop_proposal_save_root)
     analyze_proposal(prop_t_fg + prop_t_bg, classes, show_save_dir=os.path.join(gt_pred_show_root, 'target'), 
                     crop_save_dir=target_crop_proposal_save_root, show_scale=0.6, show_flag=show_flag, crop_flag=crop_flag)
     
@@ -418,15 +434,35 @@ def train(model, logger, cfg, args, args_cls, args_box):
             if args.update_proposal and cascade_id == 0:
             # if True:
                 print('update proposal for category at cascade_{}: ignore_scores {}, ignore_ious {}'.format(cascade_id, ignored_scores_ls[cascade_id], ignored_ious_ls[cascade_id]))
-                prop_s_fg_update = update_proposal(prop_s_fg, len(classes), ignored_ious_ls[cascade_id])
-                prop_s_bg_update = update_proposal(prop_s_bg, len(classes), ignored_ious_ls[cascade_id])
-                prop_t_fg_update = update_proposal(prop_t_fg, len(classes), ignored_ious_ls[cascade_id])
-                prop_t_bg_update = update_proposal(prop_t_bg, len(classes), ignored_ious_ls[cascade_id])
+                prop_s_fg = update_proposal(prop_s_fg, len(classes), ignored_ious_ls[cascade_id])
+                prop_s_bg = update_proposal(prop_s_bg, len(classes), ignored_ious_ls[cascade_id])
+                prop_t_fg = update_proposal(prop_t_fg, len(classes), ignored_ious_ls[cascade_id])
+                prop_t_bg = update_proposal(prop_t_bg, len(classes), ignored_ious_ls[cascade_id])
 
-                compare_proposals(prop_s_fg, prop_s_fg_update)
-                compare_proposals(prop_s_bg, prop_s_bg_update)
-                compare_proposals(prop_t_fg, prop_t_fg_update)
-                compare_proposals(prop_t_bg, prop_t_bg_update)
+                # prop_s_fg_update = update_proposal(prop_s_fg, len(classes), ignored_ious_ls[cascade_id])
+                # prop_s_bg_update = update_proposal(prop_s_bg, len(classes), ignored_ious_ls[cascade_id])
+                # prop_t_fg_update = update_proposal(prop_t_fg, len(classes), ignored_ious_ls[cascade_id])
+                # prop_t_bg_update = update_proposal(prop_t_bg, len(classes), ignored_ious_ls[cascade_id])
+
+                # compare_proposals(prop_s_fg, prop_s_fg_update)
+                # compare_proposals(prop_s_bg, prop_s_bg_update)
+                # compare_proposals(prop_t_fg, prop_t_fg_update)
+                # compare_proposals(prop_t_bg, prop_t_bg_update)
+
+                map_evaluater_target.reset()
+                map_evaluater_target.process(prop_t_fg + prop_t_bg)
+                results = map_evaluater_target.evaluate()
+                print('updated target proposal mAP:')
+                print(results)
+
+                map_evaluater_source.reset()
+                map_evaluater_source.process(prop_s_fg + prop_s_bg)
+                results = map_evaluater_source.evaluate()
+                print('updated source proposal mAP:')
+                print(results)
+
+                # exit()
+
             
             # if cascade_id == 0:
             #     category_adaptor.load_checkpoint()
@@ -626,6 +662,8 @@ if __name__ == "__main__":
 
     parser.add_argument('--use-pre-cache', default=0, type=int,
                         help='pre cache')
+    parser.add_argument('--use-pre-crop', default=0, type=int,
+                        help='pre crop')
     parser.add_argument('--update-score', default=0, type=int,
                         help='pre cache')
     parser.add_argument('--update-cache', default=0, type=int,

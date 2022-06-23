@@ -423,7 +423,7 @@ class CategoryAdaptor:
         parser.add_argument('--epsilon-c', default=0.01, type=float,
                             help='epsilon hyper-parameter in Robust Cross Entropy')
         # training parameters
-        parser.add_argument('--batch-size-c', default=320, type=int,
+        parser.add_argument('--batch-size-c', default=64, type=int,
                             metavar='N',
                             help='mini-batch size (default: 64)')   # 64
         parser.add_argument('--learning-rate-c', default=0.01, type=float,
@@ -438,9 +438,9 @@ class CategoryAdaptor:
                             help='number of data loading workers (default: 2)')
         parser.add_argument('--epochs-c', default=10, type=int, metavar='N',
                             help='number of total epochs to run')   # 10
-        parser.add_argument('--iters-per-epoch-c', default=200, type=int,
-                            help='Number of iterations per epoch') # 1000 200
-        parser.add_argument('--print-freq-c', default=50, type=int,
+        parser.add_argument('--iters-per-epoch-c', default=1000, type=int,
+                            help='Number of iterations per epoch') # 1000
+        parser.add_argument('--print-freq-c', default=100, type=int,
                             metavar='N', help='print frequency (default: 100)')
         parser.add_argument('--seed-c', default=None, type=int,
                             help='seed for initializing training. ')
