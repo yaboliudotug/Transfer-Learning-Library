@@ -34,7 +34,8 @@ from detectron2.data import (
 )
 from detectron2.utils.events import EventStorage
 from detectron2.evaluation import inference_on_dataset
-
+from detectron2.structures import pairwise_iou
+from detectron2.structures import Boxes
 
 sys.path.append('../../../..')
 import tllib.alignment.d_adapt.modeling.meta_arch as models
@@ -47,6 +48,73 @@ from utils import PascalVOCDetectionPerClassEvaluatorMAP
 
 import category_adaptation
 import bbox_adaptation
+
+import matplotlib.pyplot as plt 
+
+def statistic_proposal(proposals, save_path):
+    class_iou_dict = {}
+    class_gtclass_dict = {}
+    iou_count_dict = {}
+    catch_ious = []
+    for proposal in proposals:
+        pred_boxes, gt_fg_classes, gt_classes, gt_ious, gt_boxes = proposal.pred_boxes, proposal.gt_fg_classes, proposal.gt_classes, proposal.gt_ious, proposal.gt_boxes
+        all_gt_classes, all_gt_boxes = proposal.all_gt_classes, proposal.all_gt_boxes
+        assert len(pred_boxes) == len(gt_fg_classes) == len(gt_classes) == len(gt_ious) == len(gt_boxes), 'pred lenght not equal'
+        for iou, fg_cls, cls in zip(gt_ious, gt_fg_classes, gt_classes):
+            iou = round(iou, 1)
+            if str(iou) not in iou_count_dict.keys():
+                iou_count_dict[str(iou)] = 0
+            iou_count_dict[str(iou)] += 1
+
+            if str(cls) not in class_iou_dict.keys():
+                class_iou_dict[str(cls)] = []
+            class_iou_dict[str(cls)].append(iou)
+
+            if str(cls) not in class_gtclass_dict.keys():
+                class_gtclass_dict[str(cls)] = []
+            class_gtclass_dict[str(cls)].append(str(fg_cls))
+
+        all_gt_boxes, pred_boxes = Boxes(all_gt_boxes), Boxes(pred_boxes)
+        pred_ious = pairwise_iou(all_gt_boxes, pred_boxes)
+        catch_ious.append(pred_ious)
+    
+    x, y = [], []
+    
+    # catch_ious = np.concatenate(catch_ious, axis=0)
+    for iou in range(0, 100, 10):
+        iou = iou / 100
+        count = 0
+        all_gt_count = 0
+        for one_catch_ious in catch_ious:
+            all_gt_count += one_catch_ious.shape[0]
+            one_count = one_catch_ious > iou
+            one_count = one_count.any(1).sum()
+            count += one_count
+        x.append(iou)
+        y.append(count / all_gt_count)
+        # y.append(count)
+    plt.figure(figsize=(15,5))
+    plt.bar(x, y, color = '#9999ff', width = 0.05)
+    plt.title('all ious count')
+    plt.xlabel('iou')
+    plt.ylabel('count')
+    plt.savefig(save_path)
+    plt.close()
+    
+
+    
+    # x = sorted(iou_count_dict.keys())
+    # y = []
+    # for i in x:
+    #     y.append(iou_count_dict[i])
+
+    # plt.figure(figsize=(10,5))
+    # plt.bar(x, y, color = '#9999ff', width = 0.5) 
+    # plt.title('all ious count') 
+    # plt.xlabel('iou') 
+    # plt.ylabel('count') 
+    # plt.savefig(save_path) 
+    # plt.close()
 
 
 
@@ -343,7 +411,8 @@ def train(model, logger, cfg, args, args_cls, args_box):
     # pre_cache_root = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_4/logs/faster_rcnn_R_101_C4/cityscapes2foggy/phase1/cache'
     pre_cache_root = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_4/logs/faster_rcnn_R_101_C4/cityscapes2foggy_update_0/phase1/cache'
     
-    if args.use_pre_cache:
+    # if args.use_pre_cache:
+    if True:
         if not os.path.exists(cache_proposal_root):
             print('using pre cahce ......')
             os.makedirs(os.path.join(cfg.OUTPUT_DIR, "cache"), exist_ok=True)
@@ -352,16 +421,16 @@ def train(model, logger, cfg, args, args_cls, args_box):
     prop_t_fg, prop_t_bg = generate_proposals(model, len(classes), args.targets, cache_proposal_root, cfg)
     prop_s_fg, prop_s_bg = generate_proposals(model, len(classes), args.sources, cache_proposal_root, cfg)    
 
-
+    print('\norigin map:')
     map_evaluater_target = PascalVOCDetectionPerClassEvaluatorMAP(args.targets[0])
     # map_evaluater_target.reset()
-    # map_evaluater_target.process(prop_t_fg + prop_t_bg)
+    # map_evaluater_target.process(prop_t_fg + prop_t_bg, len(classes))
     # results = map_evaluater_target.evaluate()
     # print(results)
 
     map_evaluater_source = PascalVOCDetectionPerClassEvaluatorMAP(args.sources[0])
     # map_evaluater_source.reset()
-    # map_evaluater_source.process(prop_s_fg + prop_s_bg)
+    # map_evaluater_source.process(prop_s_fg + prop_s_bg, len(classes))
     # results = map_evaluater_source.evaluate()
     # print(results)
 
@@ -390,6 +459,10 @@ def train(model, logger, cfg, args, args_cls, args_box):
     analyze_proposal(prop_t_fg + prop_t_bg, classes, show_save_dir=os.path.join(gt_pred_show_root, 'target'), 
                     crop_save_dir=target_crop_proposal_save_root, show_scale=0.6, show_flag=show_flag, crop_flag=crop_flag)
     
+    statistic_proposal(prop_s_fg + prop_s_bg, save_path=os.path.join(cfg.OUTPUT_DIR, 'statistic_proposal_source.jpg'))
+    statistic_proposal(prop_t_fg + prop_t_bg, save_path=os.path.join(cfg.OUTPUT_DIR, 'statistic_proposal_target.jpg'))
+    # exit()
+
     prop_t_fg_category = None
     prop_t_bg_category = None
 
@@ -431,7 +504,8 @@ def train(model, logger, cfg, args, args_cls, args_box):
         if cascade_flag_category[cascade_id]:
             # train the category adaptor
             category_adaptor = category_adaptation.CategoryAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "cls_{}".format(cascade_id)), args_cls)
-            if args.update_proposal and cascade_id == 0:
+            if args.update_proposal:
+            # and cascade_id == 0:
             # if True:
                 print('update proposal for category at cascade_{}: ignore_scores {}, ignore_ious {}'.format(cascade_id, ignored_scores_ls[cascade_id], ignored_ious_ls[cascade_id]))
                 prop_s_fg = update_proposal(prop_s_fg, len(classes), ignored_ious_ls[cascade_id])
@@ -450,13 +524,13 @@ def train(model, logger, cfg, args, args_cls, args_box):
                 # compare_proposals(prop_t_bg, prop_t_bg_update)
 
                 map_evaluater_target.reset()
-                map_evaluater_target.process(prop_t_fg + prop_t_bg)
+                map_evaluater_target.process(prop_t_fg + prop_t_bg, len(classes))
                 results = map_evaluater_target.evaluate()
                 print('updated target proposal mAP:')
                 print(results)
 
                 map_evaluater_source.reset()
-                map_evaluater_source.process(prop_s_fg + prop_s_bg)
+                map_evaluater_source.process(prop_s_fg + prop_s_bg, len(classes))
                 results = map_evaluater_source.evaluate()
                 print('updated source proposal mAP:')
                 print(results)
@@ -473,10 +547,10 @@ def train(model, logger, cfg, args, args_cls, args_box):
 
             if not category_adaptor.load_checkpoint():
             # if True:
-                data_loader_source = category_adaptor.prepare_training_data(prop_s_fg + prop_s_bg, True, 
-                                                                            crop_img_dir=source_crop_proposal_save_root)
-                data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False,
-                                                                            crop_img_dir=target_crop_proposal_save_root)
+                data_loader_source = category_adaptor.prepare_training_data(prop_s_fg + prop_s_bg, True, crop_img_dir=source_crop_proposal_save_root, 
+                                                                            ignored_scores=ignored_scores_ls[cascade_id], ignored_ious=ignored_ious_ls[cascade_id])
+                data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False, crop_img_dir=target_crop_proposal_save_root,
+                                                                            ignored_scores=ignored_scores_ls[cascade_id], ignored_ious=ignored_ious_ls[cascade_id])
                 data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg, 
                                                                                 crop_img_dir=target_crop_proposal_save_root)
                 category_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation)
@@ -495,17 +569,41 @@ def train(model, logger, cfg, args, args_cls, args_box):
             prop_t_bg_category = copy.deepcopy(prop_t_bg)
             category_adaptor.model.to(torch.device("cpu"))
 
+            map_evaluater_target.reset()
+            map_evaluater_target.process(prop_t_fg + prop_t_bg, num_classes=len(classes))
+            results = map_evaluater_target.evaluate()
+            print('generated target proposal mAP:')
+            print(results)
+
+            # map_evaluater_source.reset()
+            # map_evaluater_source.process(prop_s_fg + prop_s_bg)
+            # results = map_evaluater_source.evaluate()
+            # print('generated source proposal mAP:')
+            # print(results)
+
 
         if args.bbox_refine and cascade_flag_bbox[cascade_id]:
             # train the bbox adaptor
             bbox_adaptor = bbox_adaptation.BoundingBoxAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "bbox_{}".format(cascade_id)), args_box)
-            # if args.update_proposal:
-            if False:
+            if args.update_proposal:
+            # if False:
                 print('update proposal for bbox at cascade_{}: ignore_scores {}, ignore_ious {}'.format(cascade_id, ignored_scores_ls[cascade_id], ignored_ious_ls[cascade_id]))
                 prop_s_fg = update_proposal(prop_s_fg, len(classes), ignored_ious_ls[cascade_id])
                 prop_s_bg = update_proposal(prop_s_bg, len(classes), ignored_ious_ls[cascade_id])
                 prop_t_fg = update_proposal(prop_t_fg, len(classes), ignored_ious_ls[cascade_id])
                 prop_t_bg = update_proposal(prop_t_bg, len(classes), ignored_ious_ls[cascade_id])
+
+                map_evaluater_target.reset()
+                map_evaluater_target.process(prop_t_fg + prop_t_bg, len(classes))
+                results = map_evaluater_target.evaluate()
+                print('updated target proposal mAP:')
+                print(results)
+
+                map_evaluater_source.reset()
+                map_evaluater_source.process(prop_s_fg + prop_s_bg, len(classes))
+                results = map_evaluater_source.evaluate()
+                print('updated source proposal mAP:')
+                print(results)
             
             if not bbox_adaptor.load_checkpoint():
             # if True:
@@ -536,6 +634,18 @@ def train(model, logger, cfg, args, args_cls, args_box):
                 crop_img_dir=target_crop_proposal_save_root, remove_bg=remove_bg_flag, cascade_id=cascade_id
             )
             bbox_adaptor.model.to(torch.device("cpu"))
+
+            map_evaluater_target.reset()
+            map_evaluater_target.process(prop_t_fg + prop_t_bg, len(classes))
+            results = map_evaluater_target.evaluate()
+            print('generated target proposal mAP:')
+            print(results)
+
+            # map_evaluater_source.reset()
+            # map_evaluater_source.process(prop_s_fg + prop_s_bg)
+            # results = map_evaluater_source.evaluate()
+            # print('generated source proposal mAP:')
+            # print(results)
 
     prop_t_fg += prop_t_fg_category
     prop_t_bg += prop_t_bg_category

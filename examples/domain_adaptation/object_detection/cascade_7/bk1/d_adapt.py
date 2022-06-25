@@ -17,7 +17,6 @@ import cv2
 from regex import L
 import tqdm
 import copy
-import time
 # import copy
 
 import torch
@@ -59,13 +58,14 @@ def analyze_proposal(proposal_list, class_names, show_save_dir, crop_save_dir, s
     #     if os.path.exists(crop_save_dir):
     #         shutil.rmtree(crop_save_dir)
     #     os.makedirs(crop_save_dir, exist_ok=True)
+
     if os.path.exists(show_save_dir):
         show_flag = False
     if os.path.exists(crop_save_dir):
         crop_flag = False
     if not show_flag and not crop_flag:
         return
-    start_time = time.time()
+
     os.makedirs(show_save_dir, exist_ok=True)
     os.makedirs(crop_save_dir, exist_ok=True)
 
@@ -137,8 +137,6 @@ def analyze_proposal(proposal_list, class_names, show_save_dir, crop_save_dir, s
             img_height, img_width = img_np_show.shape[:2]
             img_np_show = cv2.resize(img_np_show, (int(img_width * show_scale), int(img_height * show_scale)))
             cv2.imwrite(os.path.join(show_save_dir, os.path.basename(file_path)), img_np_show)
-    end_time = time.time()
-    print('Analyze cost time: {:.2f}'.format((end_time - start_time) / 60))
 
 
 def generate_proposals(model, num_classes, dataset_names, cache_root, cfg):
@@ -361,7 +359,7 @@ def train(model, logger, cfg, args, args_cls, args_box):
     gt_pred_show_root = os.path.join(cfg.OUTPUT_DIR, "cache", "show_gt_pred")
     crop_proposal_save_root = os.path.join(cfg.OUTPUT_DIR, "cache", "crop_propals")
     source_crop_proposal_save_root = os.path.join(crop_proposal_save_root, 'source')
-    if args.use_pre_crop:
+    if args.use_pre_cache:
         if not os.path.exists(source_crop_proposal_save_root):
             os.makedirs(crop_proposal_save_root, exist_ok=True)
             os.symlink(os.path.join(pre_cache_root, 'crop_propals', 'source'), 
@@ -370,7 +368,7 @@ def train(model, logger, cfg, args, args_cls, args_box):
                     crop_save_dir=source_crop_proposal_save_root, show_scale=0.6, show_flag=show_flag, crop_flag=crop_flag) 
 
     target_crop_proposal_save_root = os.path.join(crop_proposal_save_root, 'target_0')
-    if args.use_pre_crop:
+    if args.use_pre_cache:
         if not os.path.exists(target_crop_proposal_save_root):
             os.symlink(os.path.join(pre_cache_root, 'crop_propals', 'target_0'), 
                         target_crop_proposal_save_root)
@@ -414,7 +412,6 @@ def train(model, logger, cfg, args, args_cls, args_box):
                 show_save_dir = os.path.join(gt_pred_show_root, 'target_{}'.format(cascade_id))
                 analyze_proposal(prop_t_fg + prop_t_bg, classes, show_save_dir=show_save_dir, 
                                 crop_save_dir=target_crop_proposal_save_root, show_scale=0.6, show_flag=show_flag, crop_flag=crop_flag)
-
 
         if cascade_flag_category[cascade_id]:
             # train the category adaptor
@@ -477,15 +474,15 @@ def train(model, logger, cfg, args, args_cls, args_box):
             
             if not bbox_adaptor.load_checkpoint():
             # if True:
-                data_loader_source_pretrain = bbox_adaptor.prepare_training_data(prop_s_fg, True, crop_img_dir=source_crop_proposal_save_root, pretrain=True)
                 data_loader_source = bbox_adaptor.prepare_training_data(prop_s_fg, True, crop_img_dir=source_crop_proposal_save_root)
                 data_loader_target = bbox_adaptor.prepare_training_data(prop_t_fg, False, crop_img_dir=target_crop_proposal_save_root)
                 data_loader_validation = bbox_adaptor.prepare_validation_data(prop_t_fg, crop_img_dir=target_crop_proposal_save_root)
-
+                # data_loader_validation_source = bbox_adaptor.prepare_validation_data_source(prop_s_fg, crop_img_dir=source_crop_proposal_save_root)
                 print('data_loader_validation baseline: ......')
-                # bbox_adaptor.validate_baseline(data_loader_validation)
-
-                bbox_adaptor.fit(data_loader_source_pretrain, data_loader_source, data_loader_target, data_loader_validation)
+                bbox_adaptor.validate_baseline(data_loader_validation)
+                # print('data_loader_validation_source baseline: ......')
+                # bbox_adaptor.validate_baseline(data_loader_validation_source)
+                bbox_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation)
                 # bbox_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation, data_loader_validation_source)
 
             # generate bounding box labels for each proposals
@@ -587,7 +584,7 @@ def main(args, args_cls, args_box):
     # create model
     model = models.__dict__[cfg.MODEL.META_ARCHITECTURE](cfg, finetune=args.finetune)
     model.to(torch.device(cfg.MODEL.DEVICE))
-    # logger.info("Model:\n{}".format(model))
+    logger.info("Model:\n{}".format(model))
 
     if args.eval_only:
         DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
@@ -630,8 +627,6 @@ if __name__ == "__main__":
 
     parser.add_argument('--use-pre-cache', default=0, type=int,
                         help='pre cache')
-    parser.add_argument('--use-pre-crop', default=0, type=int,
-                        help='pre crop')
     parser.add_argument('--update-score', default=0, type=int,
                         help='pre cache')
     parser.add_argument('--update-cache', default=0, type=int,
