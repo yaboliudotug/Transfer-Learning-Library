@@ -49,7 +49,15 @@ from detectron2.layers import ShapeSpec, batched_nms
 import matplotlib.pyplot as plt 
 
 
-def statistic_proposal(proposals, save_dir, name):
+def statistic_proposal(fg_proposals_path, bg_proposals_path, save_dir, name):
+    fg_proposals = PersistentProposalList(fg_proposals_path)
+    bg_proposals = PersistentProposalList(bg_proposals_path)
+    print(fg_proposals_path)
+    print(os.path.exists(fg_proposals_path))
+    fg_proposals.load()
+    bg_proposals.load()
+    proposals = fg_proposals + bg_proposals
+
     class_iou_dict = {}
     class_gtclass_dict = {}
     iou_count_dict = {}
@@ -132,8 +140,58 @@ def generate_proposals(model, num_classes, dataset_names, cache_root, cfg):
         bg_proposals_list.flush()
     return fg_proposals_list, bg_proposals_list
 
+# if __name__ == "__main__":
+#     log_root = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_4/logs/faster_rcnn_R_101_C4/cityscapes2foggy/phase1/cache'
+#     # work_root = os.path.join('/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/', log_root, 'logs/faster_rcnn_R_101_C4/cityscapes2foggy_update_0/phase1/cache')
+#     figures_dir = os.path.join(log_root, 'figures')
+#     if not os.path.exists(figures_dir):
+#         os.mkdir(figures_dir)
+#     # proposal
+#     fg_proposals_path = os.path.join(log_root, 'proposal/.._datasets_cityscapes_in_voc_trainval_fg.json')
+#     bg_proposals_path = os.path.join(log_root, 'proposal/.._datasets_cityscapes_in_voc_trainval_bg.json')
+#     statistic_proposal(fg_proposals_path, bg_proposals_path, save_dir=figures_dir, name='proposal_source') 
+
+#     fg_proposals_path = os.path.join(log_root, 'proposal/.._datasets_foggy_cityscapes_in_voc__trainval_fg.json')
+#     bg_proposals_path = os.path.join(log_root, 'proposal/.._datasets_foggy_cityscapes_in_voc__trainval_bg.json')
+#     statistic_proposal(fg_proposals_path, bg_proposals_path, save_dir=figures_dir, name='proposal_target') 
+
+#     fg_proposals_path = os.path.join(log_root, 'feedback/.._datasets_foggy_cityscapes_in_voc__trainval_fg_0.json')
+#     bg_proposals_path = os.path.join(log_root, 'feedback/.._datasets_foggy_cityscapes_in_voc__trainval_bg_0.json')
+#     statistic_proposal(fg_proposals_path, bg_proposals_path, save_dir=figures_dir, name='feedback_target') 
+
+#     fg_proposals_path = os.path.join(log_root, 'feedback_bbox/.._datasets_foggy_cityscapes_in_voc__trainval_fg_0.json')
+#     bg_proposals_path = os.path.join(log_root, 'feedback_bbox/.._datasets_foggy_cityscapes_in_voc__trainval_bg_0.json')
+#     statistic_proposal(fg_proposals_path, bg_proposals_path, save_dir=figures_dir, name='feedback_bbox_target') 
+    
+
+
+# if __name__ == "__main__":
+#     log_root = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_4/logs/faster_rcnn_R_101_C4/cityscapes2foggy_update_0/phase1/cache'
+#     # work_root = os.path.join('/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/', log_root, 'logs/faster_rcnn_R_101_C4/cityscapes2foggy_update_0/phase1/cache')
+#     figures_dir = os.path.join(log_root, 'figures')
+#     if not os.path.exists(figures_dir):
+#         os.mkdir(figures_dir)
+#     # proposal
+#     fg_proposals_path = os.path.join(log_root, 'proposal/.._datasets_cityscapes_in_voc_trainval_fg.json')
+#     bg_proposals_path = os.path.join(log_root, 'proposal/.._datasets_cityscapes_in_voc_trainval_bg.json')
+#     statistic_proposal(fg_proposals_path, bg_proposals_path, save_dir=figures_dir, name='proposal_source') 
+
+#     fg_proposals_path = os.path.join(log_root, 'proposal/.._datasets_foggy_cityscapes_in_voc__trainval_fg.json')
+#     bg_proposals_path = os.path.join(log_root, 'proposal/.._datasets_foggy_cityscapes_in_voc__trainval_bg.json')
+#     statistic_proposal(fg_proposals_path, bg_proposals_path, save_dir=figures_dir, name='proposal_target') 
+
+#     fg_proposals_path = os.path.join(log_root, 'feedback/.._datasets_foggy_cityscapes_in_voc__trainval_fg_0.json')
+#     bg_proposals_path = os.path.join(log_root, 'feedback/.._datasets_foggy_cityscapes_in_voc__trainval_bg_0.json')
+#     statistic_proposal(fg_proposals_path, bg_proposals_path, save_dir=figures_dir, name='feedback_target') 
+
+#     fg_proposals_path = os.path.join(log_root, 'feedback_bbox/.._datasets_foggy_cityscapes_in_voc__trainval_fg_0.json')
+#     bg_proposals_path = os.path.join(log_root, 'feedback_bbox/.._datasets_foggy_cityscapes_in_voc__trainval_bg_0.json')
+#     statistic_proposal(fg_proposals_path, bg_proposals_path, save_dir=figures_dir, name='feedback_bbox_target') 
+    
+
+
 if __name__ == "__main__":
-    log_root = ''
+    log_root = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_5/logs/faster_rcnn_R_101_C4/cityscapes2foggy/phase1/cache'
     # work_root = os.path.join('/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/', log_root, 'logs/faster_rcnn_R_101_C4/cityscapes2foggy_update_0/phase1/cache')
     figures_dir = os.path.join(log_root, 'figures')
     if not os.path.exists(figures_dir):
@@ -141,25 +199,58 @@ if __name__ == "__main__":
     # proposal
     fg_proposals_path = os.path.join(log_root, 'proposal/.._datasets_cityscapes_in_voc_trainval_fg.json')
     bg_proposals_path = os.path.join(log_root, 'proposal/.._datasets_cityscapes_in_voc_trainval_bg.json')
-    fg_proposals = PersistentProposalList(fg_proposals_path)
-    bg_proposals = PersistentProposalList(bg_proposals_path)
-    fg_proposals.load()
-    bg_proposals.load()
-    statistic_proposal(fg_proposals + bg_proposals, save_dir=figures_dir, name='proposal_source') 
+    statistic_proposal(fg_proposals_path, bg_proposals_path, save_dir=figures_dir, name='proposal_source') 
 
     fg_proposals_path = os.path.join(log_root, 'proposal/.._datasets_foggy_cityscapes_in_voc__trainval_fg.json')
     bg_proposals_path = os.path.join(log_root, 'proposal/.._datasets_foggy_cityscapes_in_voc__trainval_bg.json')
-    fg_proposals = PersistentProposalList(fg_proposals_path)
-    bg_proposals = PersistentProposalList(bg_proposals_path)
-    fg_proposals.load()
-    bg_proposals.load()
-    statistic_proposal(fg_proposals + bg_proposals, save_dir=figures_dir, name='proposal_target') 
+    statistic_proposal(fg_proposals_path, bg_proposals_path, save_dir=figures_dir, name='proposal_target') 
 
-    fg_proposals_path = os.path.join(log_root, 'proposal/.._datasets_foggy_cityscapes_in_voc__trainval_fg.json')
-    bg_proposals_path = os.path.join(log_root, 'proposal/.._datasets_foggy_cityscapes_in_voc__trainval_bg.json')
-    fg_proposals = PersistentProposalList(fg_proposals_path)
-    bg_proposals = PersistentProposalList(bg_proposals_path)
-    fg_proposals.load()
-    bg_proposals.load()
-    statistic_proposal(fg_proposals + bg_proposals, save_dir=figures_dir, name='proposal_target') 
+    fg_proposals_path = os.path.join(log_root, 'feedback/.._datasets_foggy_cityscapes_in_voc__trainval_fg_0.json')
+    bg_proposals_path = os.path.join(log_root, 'feedback/.._datasets_foggy_cityscapes_in_voc__trainval_bg_0.json')
+    statistic_proposal(fg_proposals_path, bg_proposals_path, save_dir=figures_dir, name='feedback_target') 
+
+    fg_proposals_path = os.path.join(log_root, 'feedback_bbox/.._datasets_foggy_cityscapes_in_voc__trainval_fg_0.json')
+    bg_proposals_path = os.path.join(log_root, 'feedback_bbox/.._datasets_foggy_cityscapes_in_voc__trainval_bg_0.json')
+    statistic_proposal(fg_proposals_path, bg_proposals_path, save_dir=figures_dir, name='feedback_bbox_target') 
+    
+
+
+# if __name__ == "__main__":
+#     log_root = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_6/logs/faster_rcnn_R_101_C4/cityscapes2foggy_cascade_test/phase1/cache/'
+#     # work_root = os.path.join('/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/', log_root, 'logs/faster_rcnn_R_101_C4/cityscapes2foggy_update_0/phase1/cache')
+#     figures_dir = os.path.join(log_root, 'figures')
+#     if not os.path.exists(figures_dir):
+#         os.mkdir(figures_dir)
+#     # proposal
+#     fg_proposals_path = os.path.join(log_root, 'proposal/.._datasets_cityscapes_in_voc_trainval_fg.json')
+#     bg_proposals_path = os.path.join(log_root, 'proposal/.._datasets_cityscapes_in_voc_trainval_bg.json')
+#     statistic_proposal(fg_proposals_path, bg_proposals_path, save_dir=figures_dir, name='proposal_source') 
+
+#     fg_proposals_path = os.path.join(log_root, 'proposal/.._datasets_foggy_cityscapes_in_voc__trainval_fg.json')
+#     bg_proposals_path = os.path.join(log_root, 'proposal/.._datasets_foggy_cityscapes_in_voc__trainval_bg.json')
+#     statistic_proposal(fg_proposals_path, bg_proposals_path, save_dir=figures_dir, name='proposal_target') 
+
+#     fg_proposals_path = os.path.join(log_root, 'feedback/.._datasets_foggy_cityscapes_in_voc__trainval_fg_0.json')
+#     bg_proposals_path = os.path.join(log_root, 'feedback/.._datasets_foggy_cityscapes_in_voc__trainval_bg_0.json')
+#     statistic_proposal(fg_proposals_path, bg_proposals_path, save_dir=figures_dir, name='feedback_target0') 
+
+#     fg_proposals_path = os.path.join(log_root, 'feedback/.._datasets_foggy_cityscapes_in_voc__trainval_fg_1.json')
+#     bg_proposals_path = os.path.join(log_root, 'feedback/.._datasets_foggy_cityscapes_in_voc__trainval_bg_1.json')
+#     statistic_proposal(fg_proposals_path, bg_proposals_path, save_dir=figures_dir, name='feedback_target1') 
+
+#     fg_proposals_path = os.path.join(log_root, 'feedback/.._datasets_foggy_cityscapes_in_voc__trainval_fg_2.json')
+#     bg_proposals_path = os.path.join(log_root, 'feedback/.._datasets_foggy_cityscapes_in_voc__trainval_bg_2.json')
+#     statistic_proposal(fg_proposals_path, bg_proposals_path, save_dir=figures_dir, name='feedback_target2') 
+
+#     fg_proposals_path = os.path.join(log_root, 'feedback_bbox/.._datasets_foggy_cityscapes_in_voc__trainval_fg_0.json')
+#     bg_proposals_path = os.path.join(log_root, 'feedback_bbox/.._datasets_foggy_cityscapes_in_voc__trainval_bg_0.json')
+#     statistic_proposal(fg_proposals_path, bg_proposals_path, save_dir=figures_dir, name='feedback_bbox_target0')
+
+#     fg_proposals_path = os.path.join(log_root, 'feedback_bbox/.._datasets_foggy_cityscapes_in_voc__trainval_fg_1.json')
+#     bg_proposals_path = os.path.join(log_root, 'feedback_bbox/.._datasets_foggy_cityscapes_in_voc__trainval_bg_1.json')
+#     statistic_proposal(fg_proposals_path, bg_proposals_path, save_dir=figures_dir, name='feedback_bbox_target1')
+
+#     fg_proposals_path = os.path.join(log_root, 'feedback_bbox/.._datasets_foggy_cityscapes_in_voc__trainval_fg_2.json')
+#     bg_proposals_path = os.path.join(log_root, 'feedback_bbox/.._datasets_foggy_cityscapes_in_voc__trainval_bg_2.json')
+#     statistic_proposal(fg_proposals_path, bg_proposals_path, save_dir=figures_dir, name='feedback_bbox_target2') 
     

@@ -335,6 +335,8 @@ def update_proposal0(proposals, num_classes, iou_threshold=[0.03, 0.3]):
 def update_proposal(proposals, num_classes, iou_threshold=[0.03, 0.3]):
     prop_new = PersistentProposalList()
     for proposal_ori in proposals:
+        # print('>>>>>>>>')
+        # print(proposal.gt_ious)
         proposal = copy.deepcopy(proposal_ori)
         pred_boxes_np, all_gt_boxes_np, all_gt_classes_np = proposal.pred_boxes, proposal.all_gt_boxes, proposal.all_gt_classes
         pred_boxes_Boxes, all_gt_boxes_Boxes, all_gt_classes = Boxes(pred_boxes_np), Boxes(all_gt_boxes_np), torch.from_numpy(all_gt_classes_np)
@@ -346,9 +348,20 @@ def update_proposal(proposals, num_classes, iou_threshold=[0.03, 0.3]):
         proposal.gt_fg_classes = copy.deepcopy(gt_classes.numpy())
         gt_classes[gt_ious <= iou_threshold[0]] = num_classes  # background classes
         gt_classes[(iou_threshold[0] < gt_ious) & (gt_ious <= iou_threshold[1])] = -1  # ignore
+        
         proposal.gt_classes = gt_classes.numpy()
         proposal.gt_ious = gt_ious.numpy()
         proposal.gt_boxes = all_gt_boxes_Boxes[gt_classes_idx].tensor.numpy()
+        prop_new.append(proposal)
+        # print(proposal.gt_ious)
+
+        
+    return prop_new
+
+def update_proposal_9(proposals, num_classes, iou_threshold=[0.03, 0.3]):
+    prop_new = PersistentProposalList()
+    for proposal_ori in proposals:
+        proposal = copy.deepcopy(proposal_ori)
         prop_new.append(proposal)
     return prop_new
 
@@ -437,6 +450,25 @@ class Proposal:
             "width": self.width,
             "fb_set": self.fb_set
         }
+    def keys(self):
+        return [
+            # "__proposal__",
+            "image_id",
+            "filename",
+            "pred_boxes",
+            "pred_classes",
+            "pred_scores",
+            "gt_classes",
+            "gt_boxes",
+            "gt_ious",
+            "gt_fg_classes",
+            "all_gt_boxes",
+            "all_gt_classes",
+            "pred_ids",
+            "height",
+            "width",
+            "fb_set",
+        ]
 
     def __str__(self):
         pp = pprint.PrettyPrinter(indent=2)

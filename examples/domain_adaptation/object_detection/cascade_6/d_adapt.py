@@ -223,6 +223,25 @@ def generate_proposals(model, num_classes, dataset_names, cache_root, cfg):
         bg_proposals_list.flush()
     return fg_proposals_list, bg_proposals_list
 
+def generate_proposals_only_inference(model, num_classes, dataset_names, cache_root, cfg):
+    """Generate foreground proposals and background proposals from `model` and save them to the disk"""
+    if True:
+    # if not (fg_proposals_list.load() and bg_proposals_list.load()):
+        for dataset_name in dataset_names:
+            data_loader = build_detection_test_loader(cfg, dataset_name, mapper=ProposalMapper(cfg, False))
+            generator = ProposalGenerator(num_classes=num_classes)
+            fg_proposals_list_data, bg_proposals_list_data = inference_on_dataset(model, data_loader, generator)
+            # fg_proposals_list.extend(fg_proposals_list_data)
+            # bg_proposals_list.extend(bg_proposals_list_data)
+        # fg_proposals_list.flush()
+        # bg_proposals_list.flush()
+    print('using pre prop')
+    fg_proposals_list = PersistentProposalList(os.path.join(cache_root, "{}_fg.json".format(dataset_names[0])))
+    bg_proposals_list = PersistentProposalList(os.path.join(cache_root, "{}_bg.json".format(dataset_names[0])))
+    fg_proposals_list.load()
+    bg_proposals_list.load()
+    return fg_proposals_list, bg_proposals_list
+
 
 def generate_category_labels(prop, category_adaptor, cache_filename, crop_img_dir=None, cascade_id=0, update_score=False):
     """Generate category labels for each proposals in `prop` and save them to the disk"""
@@ -354,7 +373,27 @@ def compare_proposals(proposal_list_a, proposal_list_b):
             print(gt_boxes_a, gt_boxes_b)
     print('finish comparing!')
 
-
+def arrays_equal(proposal_list_a, proposal_list_b):
+    for proposal_a, proposal_b in zip(proposal_list_a, proposal_list_b):
+        for k in proposal_a.keys():
+            a = eval('proposal_a.{}'.format(k))
+            b = eval('proposal_b.{}'.format(k))
+            # if a.shape != b.shape:
+            #     print(a)
+            #     print(b)
+            #     return False
+            if type(a) is not np.ndarray:
+                if a != b:
+                    print(a)
+                    print(b)
+                    return False
+            else:
+                for ai, bi in zip(a.flat, b.flat):
+                    if ai != bi:
+                        print(a)
+                        print(b)
+                        return False
+    return True
 
 def train(model, logger, cfg, args, args_cls, args_box):
     model.train()
@@ -411,15 +450,22 @@ def train(model, logger, cfg, args, args_cls, args_box):
     # pre_cache_root = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_4/logs/faster_rcnn_R_101_C4/cityscapes2foggy/phase1/cache'
     pre_cache_root = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_4/logs/faster_rcnn_R_101_C4/cityscapes2foggy_update_0/phase1/cache'
     
-    # if args.use_pre_cache:
-    if True:
+    if args.use_pre_cache:
+    # if True:
         if not os.path.exists(cache_proposal_root):
             print('using pre cahce ......')
             os.makedirs(os.path.join(cfg.OUTPUT_DIR, "cache"), exist_ok=True)
             os.symlink(os.path.join(pre_cache_root, 'proposal'), cache_proposal_root)
+        print('using pre prop beging ..... ')
+        # prop_t_fg, prop_t_bg = generate_proposals_only_inference(model, len(classes), args.targets, cache_proposal_root, cfg)
+        # prop_s_fg, prop_s_bg = generate_proposals_only_inference(model, len(classes), args.sources, cache_proposal_root, cfg)    
+        prop_t_fg, prop_t_bg = generate_proposals(model, len(classes), args.targets, cache_proposal_root, cfg)
+        prop_s_fg, prop_s_bg = generate_proposals(model, len(classes), args.sources, cache_proposal_root, cfg)    
+    else:
+        prop_t_fg, prop_t_bg = generate_proposals(model, len(classes), args.targets, cache_proposal_root, cfg)
+        prop_s_fg, prop_s_bg = generate_proposals(model, len(classes), args.sources, cache_proposal_root, cfg)    
 
-    prop_t_fg, prop_t_bg = generate_proposals(model, len(classes), args.targets, cache_proposal_root, cfg)
-    prop_s_fg, prop_s_bg = generate_proposals(model, len(classes), args.sources, cache_proposal_root, cfg)    
+
 
     print('\norigin map:')
     map_evaluater_target = PascalVOCDetectionPerClassEvaluatorMAP(args.targets[0])
@@ -454,9 +500,9 @@ def train(model, logger, cfg, args, args_cls, args_box):
     target_crop_proposal_save_root = os.path.join(crop_proposal_save_root, 'target_0')
     if args.use_pre_crop:
         if not os.path.exists(target_crop_proposal_save_root):
-            os.symlink(os.path.join(pre_cache_root, 'crop_propals', 'target_0'), 
+            os.symlink(os.path.join(pre_cache_root, 'crop_propals', 'target_0'),
                         target_crop_proposal_save_root)
-    analyze_proposal(prop_t_fg + prop_t_bg, classes, show_save_dir=os.path.join(gt_pred_show_root, 'target'), 
+    analyze_proposal(prop_t_fg + prop_t_bg, classes, show_save_dir=os.path.join(gt_pred_show_root, 'target_0'),
                     crop_save_dir=target_crop_proposal_save_root, show_scale=0.6, show_flag=show_flag, crop_flag=crop_flag)
     
     statistic_proposal(prop_s_fg + prop_s_bg, save_path=os.path.join(cfg.OUTPUT_DIR, 'statistic_proposal_source.jpg'))
@@ -512,11 +558,18 @@ def train(model, logger, cfg, args, args_cls, args_box):
                 prop_s_bg = update_proposal(prop_s_bg, len(classes), ignored_ious_ls[cascade_id])
                 prop_t_fg = update_proposal(prop_t_fg, len(classes), ignored_ious_ls[cascade_id])
                 prop_t_bg = update_proposal(prop_t_bg, len(classes), ignored_ious_ls[cascade_id])
+                # 逐条复制生成新list，看是否管用
+                # 作统计图时，查看每个类别剩余的prop数量
 
                 # prop_s_fg_update = update_proposal(prop_s_fg, len(classes), ignored_ious_ls[cascade_id])
                 # prop_s_bg_update = update_proposal(prop_s_bg, len(classes), ignored_ious_ls[cascade_id])
                 # prop_t_fg_update = update_proposal(prop_t_fg, len(classes), ignored_ious_ls[cascade_id])
                 # prop_t_bg_update = update_proposal(prop_t_bg, len(classes), ignored_ious_ls[cascade_id])
+
+                # print(arrays_equal(prop_s_fg, prop_s_fg_update))
+                # print(arrays_equal(prop_s_bg, prop_s_bg_update))
+                # print(arrays_equal(prop_t_fg, prop_t_fg_update))
+                # print(arrays_equal(prop_t_bg, prop_t_bg_update))
 
                 # compare_proposals(prop_s_fg, prop_s_fg_update)
                 # compare_proposals(prop_s_bg, prop_s_bg_update)
@@ -585,8 +638,8 @@ def train(model, logger, cfg, args, args_cls, args_box):
         if args.bbox_refine and cascade_flag_bbox[cascade_id]:
             # train the bbox adaptor
             bbox_adaptor = bbox_adaptation.BoundingBoxAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "bbox_{}".format(cascade_id)), args_box)
-            if args.update_proposal:
-            # if False:
+            # if args.update_proposal:
+            if False:
                 print('update proposal for bbox at cascade_{}: ignore_scores {}, ignore_ious {}'.format(cascade_id, ignored_scores_ls[cascade_id], ignored_ious_ls[cascade_id]))
                 prop_s_fg = update_proposal(prop_s_fg, len(classes), ignored_ious_ls[cascade_id])
                 prop_s_bg = update_proposal(prop_s_bg, len(classes), ignored_ious_ls[cascade_id])

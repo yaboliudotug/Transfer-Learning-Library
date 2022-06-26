@@ -560,7 +560,7 @@ class BoundingBoxAdaptor:
         parser.add_argument('--pretrain-lr-decay-b', default=0.75, type=float, help='parameter for lr scheduler')
         parser.add_argument('--pretrain-weight-decay-b', default=1e-3, type=float,
                             metavar='W', help='weight decay (default: 1e-3)')
-        parser.add_argument('--pretrain-epochs-b', default=5, type=int, metavar='N',
+        parser.add_argument('--pretrain-epochs-b', default=10, type=int, metavar='N',
                             help='number of total epochs to run')   # 10
         parser.add_argument('--iters-per-epoch-b', default=1000, type=int,
                             help='Number of iterations per epoch') # 1000
