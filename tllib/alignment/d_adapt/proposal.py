@@ -333,6 +333,7 @@ def update_proposal0(proposals, num_classes, iou_threshold=[0.03, 0.3]):
     return prop_new
 
 def update_proposal(proposals, num_classes, iou_threshold=[0.03, 0.3]):
+    # print('here is the update proposal !!!!!!!!')
     prop_new = PersistentProposalList()
     for proposal_ori in proposals:
         # print('>>>>>>>>')
