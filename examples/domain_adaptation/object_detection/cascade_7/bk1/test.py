@@ -145,24 +145,7 @@ def generate_proposals(model, num_classes, dataset_names, cache_root, cfg):
         bg_proposals_list.flush()
     return fg_proposals_list, bg_proposals_list
 
-
 if __name__ == "__main__":
-    log_root = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_7/logs/faster_rcnn_R_101_C4/cityscapes2foggy_test_0/phase1/cache'
-
-
-    figures_dir = os.path.join(log_root, 'figures')
-    if not os.path.exists(figures_dir):
-        os.mkdir(figures_dir)
-    # proposal
-    fg_proposals_path = os.path.join(log_root, 'proposal/.._datasets_foggy_cityscapes_in_voc__trainval_fg.json')
-    bg_proposals_path = os.path.join(log_root, 'proposal/.._datasets_foggy_cityscapes_in_voc__trainval_bg.json')
-    statistic_proposal(fg_proposals_path, bg_proposals_path, save_dir=figures_dir, name='proposal_source') 
-
-    fg_proposals_path = os.path.join(log_root, 'proposal/.._datasets_foggy_cityscapes_in_voc__trainval_fg.json')
-    bg_proposals_path = os.path.join(log_root, 'proposal/.._datasets_foggy_cityscapes_in_voc__trainval_bg.json')
-    statistic_proposal(fg_proposals_path, bg_proposals_path, save_dir=figures_dir, name='proposal_target')
-
-if __name__ == "__main__0":
     # log_root = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_6/logs/faster_rcnn_R_101_C4/cityscapes2foggy_cascade_test/phase1/cache'
     # log_root = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_6/logs/faster_rcnn_R_101_C4/cityscapes2foggy_update_new_0/phase1/cache'
     log_root = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_7/logs/faster_rcnn_R_101_C4/cityscapes2foggy_test_0/phase1/cache'

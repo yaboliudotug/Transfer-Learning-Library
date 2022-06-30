@@ -9,6 +9,7 @@ import os
 import argparse
 from pickle import NONE
 from random import random, shuffle
+import shutil
 import sys
 import pprint
 from turtle import clone
@@ -166,10 +167,22 @@ def analyze_proposal(proposal_list, class_names, show_save_dir, crop_save_dir, s
     palette = {'red': (0, 0, 255), 'green': (0, 255, 0), 'blue': (255, 0, 0)}
     class_names = class_names + ['bg']
     img_height, img_width = 0, 0
+    show_count = 0
     for proposals in tqdm.tqdm(proposal_list):
         file_path = proposals.filename
         img_np_show = cv2.imread(file_path)
         img_np_clean = img_np_show.copy()
+        if show_flag and show_count < 20:
+            gt_classes, gt_bboxes = proposals.all_gt_classes, proposals.all_gt_boxes
+            for idx in range(len(gt_classes)):
+                class_id, bbox = gt_classes[idx], gt_bboxes[idx]
+                bbox = [int(i) for i in bbox]
+                class_name = class_names[class_id]
+                cv2.rectangle(img_np_show, (bbox[0], bbox[1]), (bbox[2], bbox[3]), palette['blue'], 2) 
+                cv2.putText(img_np_show, '{}'.format(class_name), (bbox[2] + 2, bbox[1] + 2), cv2.FONT_HERSHEY_COMPLEX,
+                                0.7, palette['blue'], 1)
+            
+
         for idx in range(len(proposals.pred_classes)):
             pred_box = proposals.pred_boxes[idx]
             pred_class = proposals.pred_classes[idx]
@@ -188,24 +201,21 @@ def analyze_proposal(proposal_list, class_names, show_save_dir, crop_save_dir, s
                 except:
                     print(pred_box, img_np_clean.shape, crop_name)
                     pass
-            if show_flag:
+            if show_flag and show_count < 20:
                 cv2.rectangle(img_np_show, (pred_box[0], pred_box[1]), (pred_box[2], pred_box[3]), palette['red'], 2) 
                 cv2.putText(img_np_show, '{}_{:.2f}'.format(pred_class_name, pred_score), (pred_box[2] + 2, pred_box[1] + 2), cv2.FONT_HERSHEY_COMPLEX,
                                 0.7, palette['red'], 1)
 
-        if show_flag:
-            gt_classes, gt_bboxes = proposals.all_gt_classes, proposals.all_gt_boxes
-            for idx in range(len(gt_classes)):
-                class_id, bbox = gt_classes[idx], gt_bboxes[idx]
-                bbox = [int(i) for i in bbox]
-                class_name = class_names[class_id]
-                cv2.rectangle(img_np_show, (bbox[0], bbox[1]), (bbox[2], bbox[3]), palette['blue'], 2) 
-                cv2.putText(img_np_show, '{}'.format(class_name), (bbox[2] + 2, bbox[1] + 2), cv2.FONT_HERSHEY_COMPLEX,
-                                0.7, palette['blue'], 1)
-            
+        if show_flag and show_count < 20:
             img_height, img_width = img_np_show.shape[:2]
             img_np_show = cv2.resize(img_np_show, (int(img_width * show_scale), int(img_height * show_scale)))
             cv2.imwrite(os.path.join(show_save_dir, os.path.basename(file_path)), img_np_show)
+
+        
+        show_count += 1
+
+        if show_count > 20:
+            break
 
 
 def generate_proposals(model, num_classes, dataset_names, cache_root, cfg):
@@ -253,8 +263,7 @@ def generate_category_labels(prop, category_adaptor, cache_filename, crop_img_di
     #     return prop_w_category
     # if True:
     
-    # if not prop_w_category.load():
-    if True:
+    if not prop_w_category.load():
         for p in prop:
             prop_w_category.append(p)
 
@@ -271,7 +280,6 @@ def generate_category_labels(prop, category_adaptor, cache_filename, crop_img_di
 def generate_bounding_box_labels_0(prop, bbox_adaptor, class_names, cache_filename, crop_img_dir=None, remove_bg=False):
     """Generate bounding box labels for each proposals in `prop` and save them to the disk"""
     prop_w_bbox = PersistentProposalList(cache_filename)
-    prop_w_bbox_temp = PersistentProposalList()
     # if not prop_w_bbox.load():
     if True:
         # remove (predicted) background proposals
@@ -299,8 +307,8 @@ def generate_bounding_box_labels(prop, bbox_adaptor, class_names, cache_filename
     # if cascade_id == 0:
     #     prop_w_bbox.load()
     #     return prop_w_bbox
-    # if not prop_w_bbox.load():
-    if True:
+    if not prop_w_bbox.load():
+    # if True:
         # remove (predicted) background proposals
         indices_fg_ls = []
         indices_bg_ls = []
@@ -449,22 +457,24 @@ def train(model, logger, cfg, args, args_cls, args_box):
 
     # pre_cache_root = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_3/logs/faster_rcnn_R_101_C4/cityscapes2foggy_ori_cache/phase1/cache'
     # pre_cache_root = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_4/logs/faster_rcnn_R_101_C4/cityscapes2foggy/phase1/cache'
-    pre_cache_root = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_4/logs/faster_rcnn_R_101_C4/cityscapes2foggy_update_0/phase1/cache'
-    
+    # pre_cache_root = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_4/logs/faster_rcnn_R_101_C4/cityscapes2foggy_update_0/phase1/cache'
+    pre_cache_root = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_6/logs/faster_rcnn_R_101_C4/cityscapes2foggy_update_new_3/phase1/cache'
+
     if args.use_pre_cache:
     # if True:
         if not os.path.exists(cache_proposal_root):
             print('using pre cahce ......')
             os.makedirs(os.path.join(cfg.OUTPUT_DIR, "cache"), exist_ok=True)
-            os.symlink(os.path.join(pre_cache_root, 'proposal'), cache_proposal_root)
-        print('using pre prop beging ..... ')
+            shutil.copytree(os.path.join(pre_cache_root, 'proposal'), cache_proposal_root, dirs_exist_ok=True)
+            # os.symlink(os.path.join(pre_cache_root, 'proposal'), cache_proposal_root)
+        # print('using pre prop beging ..... ')
         # prop_t_fg, prop_t_bg = generate_proposals_only_inference(model, len(classes), args.targets, cache_proposal_root, cfg)
         # prop_s_fg, prop_s_bg = generate_proposals_only_inference(model, len(classes), args.sources, cache_proposal_root, cfg)    
         prop_t_fg, prop_t_bg = generate_proposals(model, len(classes), args.targets, cache_proposal_root, cfg)
-        prop_s_fg, prop_s_bg = generate_proposals(model, len(classes), args.sources, cache_proposal_root, cfg)    
+        prop_s_fg, prop_s_bg = generate_proposals(model, len(classes), args.sources, cache_proposal_root, cfg)
     else:
         prop_t_fg, prop_t_bg = generate_proposals(model, len(classes), args.targets, cache_proposal_root, cfg)
-        prop_s_fg, prop_s_bg = generate_proposals(model, len(classes), args.sources, cache_proposal_root, cfg)    
+        prop_s_fg, prop_s_bg = generate_proposals(model, len(classes), args.sources, cache_proposal_root, cfg)
 
 
 
@@ -484,7 +494,8 @@ def train(model, logger, cfg, args, args_cls, args_box):
     model = model.to(torch.device('cpu'))
 
 
-    show_flag = False
+    # show_flag = False
+    show_flag = True
     crop_flag = True
     gt_pred_show_root = os.path.join(cfg.OUTPUT_DIR, "cache", "show_gt_pred")
     crop_proposal_save_root = os.path.join(cfg.OUTPUT_DIR, "cache", "crop_propals")
@@ -506,8 +517,8 @@ def train(model, logger, cfg, args, args_cls, args_box):
     analyze_proposal(prop_t_fg + prop_t_bg, classes, show_save_dir=os.path.join(gt_pred_show_root, 'target_0'),
                     crop_save_dir=target_crop_proposal_save_root, show_scale=0.6, show_flag=show_flag, crop_flag=crop_flag)
     
-    statistic_proposal(prop_s_fg + prop_s_bg, save_path=os.path.join(cfg.OUTPUT_DIR, 'statistic_proposal_source.jpg'))
-    statistic_proposal(prop_t_fg + prop_t_bg, save_path=os.path.join(cfg.OUTPUT_DIR, 'statistic_proposal_target.jpg'))
+    # statistic_proposal(prop_s_fg + prop_s_bg, save_path=os.path.join(cfg.OUTPUT_DIR, 'statistic_proposal_source.jpg'))
+    # statistic_proposal(prop_t_fg + prop_t_bg, save_path=os.path.join(cfg.OUTPUT_DIR, 'statistic_proposal_target.jpg'))
     # exit()
 
     prop_t_fg_category = None
@@ -531,8 +542,22 @@ def train(model, logger, cfg, args, args_cls, args_box):
     assert args.num_cascade == len(cascade_flag_bbox), 'num_cascade {} not equals to cascade_flag_bbox {}'.format(args.num_cascade, len(cascade_flag_bbox))
     assert args.num_cascade == len(ignored_scores_ls), 'num_cascade {} not equals to ignored_scores_ls {}'.format(args.num_cascade, len(ignored_scores_ls))
     assert args.num_cascade == len(ignored_ious_ls), 'num_cascade {} not equals to ignored_ious_ls {}'.format(args.num_cascade, len(ignored_ious_ls))
+    
     update_feedback_root = os.path.join(cfg.OUTPUT_DIR, "cache", "update")
+    # # update gt pred bbox
+    # prop_s_fg = update_proposal(prop_s_fg, len(classes), ignored_ious_ls[0])
+    # prop_s_bg = update_proposal(prop_s_bg, len(classes), ignored_ious_ls[0])
+    # prop_t_fg = update_proposal(prop_t_fg, len(classes), ignored_ious_ls[0])
+    # prop_t_bg = update_proposal(prop_t_bg, len(classes), ignored_ious_ls[0])
 
+    
+    # map_evaluater_target.reset()
+    # map_evaluater_target.process(prop_t_fg + prop_t_bg, len(classes))
+    # results = map_evaluater_target.evaluate()
+    # print('updated target proposal mAP:')
+    # print(results)
+
+    # '''
     for cascade_id in range(args.num_cascade):
         print('\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
         print('>>>>>>>>>>> Cascade Phase {} >>>>>>>>>>>'.format(cascade_id))
@@ -555,10 +580,15 @@ def train(model, logger, cfg, args, args_cls, args_box):
             # and cascade_id == 0:
             # if True:
                 print('update proposal for category at cascade_{}: ignore_scores {}, ignore_ious {}'.format(cascade_id, ignored_scores_ls[cascade_id], ignored_ious_ls[cascade_id]))
-                prop_s_fg = update_proposal(prop_s_fg, os.path.join(update_feedback_root, "{}_category_fg_{}.json".format(args.targets[0], cascade_id)), len(classes), ignored_ious_ls[cascade_id])
-                prop_s_bg = update_proposal(prop_s_bg, os.path.join(update_feedback_root, "{}_category_fg_{}.json".format(args.targets[0], cascade_id)), len(classes), ignored_ious_ls[cascade_id])
+                # prop_s_fg = update_proposal(prop_s_fg, os.path.join(update_feedback_root, "{}_category_fg_{}.json".format(args.sources[0], cascade_id)), len(classes), ignored_ious_ls[cascade_id])
+                # prop_s_bg = update_proposal(prop_s_bg, os.path.join(update_feedback_root, "{}_category_bg_{}.json".format(args.sources[0], cascade_id)), len(classes), ignored_ious_ls[cascade_id])
                 prop_t_fg = update_proposal(prop_t_fg, os.path.join(update_feedback_root, "{}_category_fg_{}.json".format(args.targets[0], cascade_id)), len(classes), ignored_ious_ls[cascade_id])
-                prop_t_bg = update_proposal(prop_t_bg, os.path.join(update_feedback_root, "{}_category_fg_{}.json".format(args.targets[0], cascade_id)), len(classes), ignored_ious_ls[cascade_id])
+                prop_t_bg = update_proposal(prop_t_bg, os.path.join(update_feedback_root, "{}_category_bg_{}.json".format(args.targets[0], cascade_id)), len(classes), ignored_ious_ls[cascade_id])
+                analyze_proposal(prop_t_fg + prop_t_bg, classes, show_save_dir=os.path.join(gt_pred_show_root, 'target_update'),
+                    crop_save_dir=target_crop_proposal_save_root, show_scale=0.6, show_flag=show_flag, crop_flag=crop_flag)
+                
+                
+                
                 # 逐条复制生成新list，看是否管用
                 # 作统计图时，查看每个类别剩余的prop数量
 
@@ -701,9 +731,11 @@ def train(model, logger, cfg, args, args_cls, args_box):
             # print('generated source proposal mAP:')
             # print(results)
 
+
     prop_t_fg += prop_t_fg_category
     prop_t_bg += prop_t_bg_category
 
+    # '''
     if args.reduce_proposals:
         # remove proposals
         prop_t_bg_new = []

@@ -271,6 +271,9 @@ class ProposalGenerator(DatasetEvaluator):
                 proposal.gt_ious = gt_ious.numpy()
                 proposal.gt_boxes = input_instance.gt_boxes[gt_classes_idx].tensor.numpy()
 
+                # proposal.pred_boxes = input_instance.gt_boxes[gt_classes_idx].tensor.numpy()
+                # proposal.pred_classes = gt_classes.numpy()
+
             if gt_boxes.tensor.shape[0] == 0:
                 proposal.all_gt_classes = proposal.all_gt_boxes = np.array([])
             else:
@@ -291,7 +294,7 @@ class ProposalGenerator(DatasetEvaluator):
     def evaluate(self):
         return self.fg_proposal_list, self.bg_proposal_list
 
-def update_proposal0(proposals, num_classes, iou_threshold=[0.03, 0.3]):
+def update_proposal000(proposals, num_classes, iou_threshold=[0.03, 0.3]):
     prop_new = PersistentProposalList()
     for proposal in proposals:
         pred_boxes_np, all_gt_boxes_np, all_gt_classes_np = proposal.pred_boxes, proposal.all_gt_boxes, proposal.all_gt_classes
@@ -332,13 +335,14 @@ def update_proposal0(proposals, num_classes, iou_threshold=[0.03, 0.3]):
         prop_new.append(proposal)
     return prop_new
 
-def update_proposal(proposals, num_classes, iou_threshold=[0.03, 0.3]):
-    # print('here is the update proposal !!!!!!!!')
-    prop_new = PersistentProposalList()
+def update_proposal(proposals, cache_file, num_classes, iou_threshold=[0.03, 0.3]):
+    print('here is the update proposal !!!!!!!!')
+    prop_new = PersistentProposalList(cache_file)
     for proposal_ori in proposals:
         # print('>>>>>>>>')
         # print(proposal.gt_ious)
         proposal = copy.deepcopy(proposal_ori)
+
         pred_boxes_np, all_gt_boxes_np, all_gt_classes_np = proposal.pred_boxes, proposal.all_gt_boxes, proposal.all_gt_classes
         pred_boxes_Boxes, all_gt_boxes_Boxes, all_gt_classes = Boxes(pred_boxes_np), Boxes(all_gt_boxes_np), torch.from_numpy(all_gt_classes_np)
         if pred_boxes_Boxes.tensor.shape[0] == 0 or all_gt_boxes_Boxes.tensor.shape[0] == 0:
@@ -353,16 +357,34 @@ def update_proposal(proposals, num_classes, iou_threshold=[0.03, 0.3]):
         proposal.gt_classes = gt_classes.numpy()
         proposal.gt_ious = gt_ious.numpy()
         proposal.gt_boxes = all_gt_boxes_Boxes[gt_classes_idx].tensor.numpy()
+
+        # proposal.pred_boxes = proposal.gt_boxes
+        # proposal.pred_classes = proposal.gt_classes
+        # proposal = proposal[proposal.pred_classes != -1]
+
+        
+        
         prop_new.append(proposal)
         # print(proposal.gt_ious)
+    prop_new.flush()
 
         
     return prop_new
 
-def update_proposal_9(proposals, num_classes, iou_threshold=[0.03, 0.3]):
+def update_proposal_9(proposals, num_classes, iou_threshold=[0.03, 0.3], remove_bg=False):
     prop_new = PersistentProposalList()
+    print('update proposal gt ...')
     for proposal_ori in proposals:
         proposal = copy.deepcopy(proposal_ori)
+
+        proposal.pred_boxes = proposal.gt_boxes
+        proposal.pred_classes = proposal.gt_classes
+        proposal = proposal[proposal.pred_classes != -1]
+        # if not remove_bg:
+        #     keep_indices = (0 <= proposal.pred_classes) & (proposal.pred_classes < num_classes)
+        #     prop_new.append(proposal[~keep_indices])
+        # else:
+        #     prop_new.append(proposal)
         prop_new.append(proposal)
     return prop_new
 

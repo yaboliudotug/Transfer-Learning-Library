@@ -134,6 +134,7 @@ examples/domain_adaptation/digits/data/*
 examples/domain_adaptation/object_detection/datasets/*
 examples/domain_adaptation/object_detection/logs/*
 
+examples/domain_adaptation/object_detection/ori_weights/*
 examples/domain_adaptation/object_detection/d_adapt/logs/*
 examples/domain_adaptation/object_detection/cascade_adapt/logs/*
 examples/domain_adaptation/object_detection/cascade_2/logs/*
