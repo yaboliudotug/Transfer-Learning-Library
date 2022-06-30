@@ -272,7 +272,7 @@ def generate_category_labels(prop, category_adaptor, cache_filename, crop_img_di
         for p in prop_w_category:
             p.pred_classes = np.array([predictions.popleft() for _ in range(len(p))])
 
-            # p.pred_classes = copy.deepcopy(p.gt_classes)
+            p.pred_classes = copy.deepcopy(p.gt_classes)
 
             if update_score:
                 p.pred_scores = np.array([scores.popleft() for _ in range(len(p))])
@@ -341,7 +341,7 @@ def generate_bounding_box_labels(prop, bbox_adaptor, class_names, cache_filename
         for p in prop_w_bbox_fg:
             p.pred_boxes = np.array([predictions.popleft() for _ in range(len(p))])
 
-            # p.pred_boxes = copy.deepcopy(p.gt_boxes)
+            p.pred_boxes = copy.deepcopy(p.gt_boxes)
 
         print('generate_bounding_box_labels remove_bg: {}'.format(remove_bg))
         if not remove_bg:
