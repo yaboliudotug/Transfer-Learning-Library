@@ -12,6 +12,10 @@ import os.path as osp
 from collections import deque
 import tqdm
 from typing import List
+from pprint import pprint
+import numpy as np
+
+from sklearn.metrics import confusion_matrix
 
 import torch
 from torch import Tensor
@@ -362,6 +366,19 @@ class CategoryAdaptor:
         model.eval()
         confmat = ConfusionMatrix(len(class_names)+1)
 
+        pred_true_class_dict = [[] for i in range(len(class_names) + 1)]
+        pred_true_score_dict = [[] for i in range(len(class_names) + 1)]
+        pred_true_score_dict_mean = [[] for i in range(len(class_names) + 1)]
+        pred_true_score_dict_max = [[] for i in range(len(class_names) + 1)]
+        pred_true_score_dict_min = [[] for i in range(len(class_names) + 1)]
+        for i in range(len(class_names) + 1):
+            pred_true_class_dict[i] = [0 for j in range(len(class_names) + 1)]
+            pred_true_score_dict_mean[i] = [0 for j in range(len(class_names) + 1)]
+            pred_true_score_dict[i] = [[] for j in range(len(class_names) + 1)]
+            pred_true_score_dict_max[i] = [0 for j in range(len(class_names) + 1)]
+            pred_true_score_dict_min[i] = [0 for j in range(len(class_names) + 1)]
+
+
         with torch.no_grad():
             end = time.time()
             for i, (images, labels) in enumerate(val_loader):
@@ -378,6 +395,16 @@ class CategoryAdaptor:
                 losses.update(loss.item(), images.size(0))
                 top1.update(acc1.item(), images.size(0))
 
+
+                pred_classes = output.argmax(1)
+                pred_scores = F.softmax(output)
+                pred_scores = pred_scores.max(1)[0]
+
+                for j in range(len(pred_classes)):
+                    pred_true_score_dict[int(pred_classes[j].cpu())][int(gt_classes[j].cpu())].append(float(pred_scores[j].cpu()))
+                    pred_true_class_dict[int(pred_classes[j].cpu())][int(gt_classes[j].cpu())] += 1
+
+
                 # measure elapsed time
                 batch_time.update(time.time() - end)
                 end = time.time()
@@ -388,8 +415,77 @@ class CategoryAdaptor:
             print(' * Acc@1 {top1.avg:.3f}'.format(top1=top1))
             print(confmat.format(class_names+["bg"]))
             print(confmat.mat)
+            pred_true_class_dict = np.array(pred_true_class_dict)
+            pprint(pred_true_class_dict)
+
+            for i in range(len(class_names) + 1):
+                for j in range(len(class_names) + 1):
+                    if len(pred_true_score_dict[i][j]) == 0:
+                        pred_true_score_dict[i][j] = [0]
+                        # pred_true_score_dict_mean[i][j] = [0]
+                    # else:
+                    pred_true_score_dict_mean[i][j] = sum(pred_true_score_dict[i][j]) / len(pred_true_score_dict[i][j])
+                    pred_true_score_dict_mean[i][j] = round(pred_true_score_dict_mean[i][j], 2)
+                    pred_true_score_dict_max[i][j] = round(max(pred_true_score_dict[i][j]), 2)
+                    pred_true_score_dict_min[i][j] = round(min(pred_true_score_dict[i][j]), 2)
+
+            pred_true_score_dict_mean = np.array(pred_true_score_dict_mean)
+            pred_true_score_dict_min = np.array(pred_true_score_dict_min)
+            pred_true_score_dict_max = np.array(pred_true_score_dict_max)
+            pprint(pred_true_score_dict_mean)
+            pprint(pred_true_score_dict_min)
+            pprint(pred_true_score_dict_max)
 
         return top1.avg
+
+    @staticmethod
+    def simply_validate(val_loader, class_names):
+        confmat = ConfusionMatrix(len(class_names)+1)
+        pred_true_class_dict = [[] for i in range(len(class_names) + 1)]
+        pred_true_score_dict = [[] for i in range(len(class_names) + 1)]
+        pred_true_score_dict_mean = [[] for i in range(len(class_names) + 1)]
+        pred_true_score_dict_max = [[] for i in range(len(class_names) + 1)]
+        pred_true_score_dict_min = [[] for i in range(len(class_names) + 1)]
+        for i in range(len(class_names) + 1):
+            pred_true_class_dict[i] = [0 for j in range(len(class_names) + 1)]
+            pred_true_score_dict_mean[i] = [0 for j in range(len(class_names) + 1)]
+            pred_true_score_dict[i] = [[] for j in range(len(class_names) + 1)]
+            pred_true_score_dict_max[i] = [0 for j in range(len(class_names) + 1)]
+            pred_true_score_dict_min[i] = [0 for j in range(len(class_names) + 1)]
+
+        for i, (images, labels) in enumerate(val_loader):
+            gt_classes = labels['gt_classes'].to(device)
+            pred_classes = labels['pred_classes'].to(device)
+            pred_scores = labels['pred_scores'].to(device)
+            confmat.update(gt_classes, pred_classes)
+            for j in range(len(pred_classes)):
+                pred_true_score_dict[int(pred_classes[j].cpu())][int(gt_classes[j].cpu())].append(float(pred_scores[j].cpu()))
+                pred_true_class_dict[int(pred_classes[j].cpu())][int(gt_classes[j].cpu())] += 1
+
+        pprint(confmat.format(class_names+["bg"]))
+        pprint(confmat.mat)
+        pred_true_class_dict = np.array(pred_true_class_dict)
+        pprint(pred_true_class_dict)
+        
+        for i in range(len(class_names) + 1):
+            for j in range(len(class_names) + 1):
+                if len(pred_true_score_dict[i][j]) == 0:
+                    pred_true_score_dict[i][j] = [0]
+                    # pred_true_score_dict_mean[i][j] = [0]
+                # else:
+                pred_true_score_dict_mean[i][j] = sum(pred_true_score_dict[i][j]) / len(pred_true_score_dict[i][j])
+                pred_true_score_dict_mean[i][j] = round(pred_true_score_dict_mean[i][j], 2)
+                pred_true_score_dict_max[i][j] = round(max(pred_true_score_dict[i][j]), 2)
+                pred_true_score_dict_min[i][j] = round(min(pred_true_score_dict[i][j]), 2)
+
+
+        pred_true_score_dict_mean = np.array(pred_true_score_dict_mean)
+        pred_true_score_dict_min = np.array(pred_true_score_dict_min)
+        pred_true_score_dict_max = np.array(pred_true_score_dict_max)
+        pprint(pred_true_score_dict_mean)
+        pprint(pred_true_score_dict_min)
+        pprint(pred_true_score_dict_max)
+
 
     @staticmethod
     def get_parser() -> argparse.ArgumentParser:
@@ -438,7 +534,7 @@ class CategoryAdaptor:
                             help='number of data loading workers (default: 2)')
         parser.add_argument('--epochs-c', default=1, type=int, metavar='N',
                             help='number of total epochs to run')   # 10
-        parser.add_argument('--iters-per-epoch-c', default=1000, type=int,
+        parser.add_argument('--iters-per-epoch-c', default=200, type=int,
                             help='Number of iterations per epoch') # 1000
         parser.add_argument('--print-freq-c', default=100, type=int,
                             metavar='N', help='print frequency (default: 100)')

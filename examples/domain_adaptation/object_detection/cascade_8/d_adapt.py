@@ -255,6 +255,10 @@ def generate_proposals_only_inference(model, num_classes, dataset_names, cache_r
 
 def generate_category_labels(prop, category_adaptor, cache_filename, crop_img_dir=None, cascade_id=0, update_score=False):
     """Generate category labels for each proposals in `prop` and save them to the disk"""
+    force_pred_to_gt_onlybg = True
+    force_pred_to_gt = False
+    if force_pred_to_gt:
+        print('Force pred to gt category ......')
     if update_score:
         print('update category scores ......')
     prop_w_category = PersistentProposalList(cache_filename)
@@ -266,13 +270,27 @@ def generate_category_labels(prop, category_adaptor, cache_filename, crop_img_di
     if not prop_w_category.load():
         for p in prop:
             prop_w_category.append(p)
-
-        data_loader_test = category_adaptor.prepare_test_data(flatten(prop_w_category), crop_img_dir=crop_img_dir)
-        predictions, scores = category_adaptor.predict(data_loader_test)
+        if not force_pred_to_gt and not force_pred_to_gt_onlybg:
+            data_loader_test = category_adaptor.prepare_test_data(flatten(prop_w_category), crop_img_dir=crop_img_dir)
+            predictions, scores = category_adaptor.predict(data_loader_test)
         for p in prop_w_category:
-            p.pred_classes = np.array([predictions.popleft() for _ in range(len(p))])
-
-            p.pred_classes = copy.deepcopy(p.gt_classes)
+            if not force_pred_to_gt and not force_pred_to_gt_onlybg:
+                # print('normal update category ...... ')
+                p.pred_classes = np.array([predictions.popleft() for _ in range(len(p))])
+            if force_pred_to_gt:
+                # print('force_pred_to_gt update category ...... ')
+                p.pred_classes = copy.deepcopy(p.gt_classes)
+            if force_pred_to_gt_onlybg:
+                # print('force_pred_to_gt_onlybg update category ...... ')
+                # p.pred_classes[p.gt_classes == 0] = 0
+                # p.pred_classes[p.gt_classes == 1] = 1
+                # p.pred_classes[p.gt_classes == 2] = 2
+                # p.pred_classes[p.gt_classes == 3] = 3
+                # p.pred_classes[p.gt_classes == 4] = 4
+                # p.pred_classes[p.gt_classes == 5] = 5
+                # p.pred_classes[p.gt_classes == 6] = 6
+                # p.pred_classes[p.gt_classes == 7] = 7
+                p.pred_classes[p.gt_classes == 8] = 8
 
             if update_score:
                 p.pred_scores = np.array([scores.popleft() for _ in range(len(p))])
@@ -316,7 +334,11 @@ def generate_bounding_box_labels(prop, bbox_adaptor, class_names, cache_filename
     prop_w_bbox = PersistentProposalList(cache_filename)
     prop_w_bbox_fg = PersistentProposalList()
     prop_w_bbox_bg = PersistentProposalList()
-    
+
+    # force_pred_to_gt = True
+    force_pred_to_gt = False
+    if force_pred_to_gt:
+        print('Force pred to gt bbox ......')
     # if cascade_id == 0:
     #     prop_w_bbox.load()
     #     return prop_w_bbox
@@ -340,8 +362,8 @@ def generate_bounding_box_labels(prop, bbox_adaptor, class_names, cache_filename
         predictions = bbox_adaptor.predict(data_loader_test)
         for p in prop_w_bbox_fg:
             p.pred_boxes = np.array([predictions.popleft() for _ in range(len(p))])
-
-            p.pred_boxes = copy.deepcopy(p.gt_boxes)
+            if force_pred_to_gt:
+                p.pred_boxes = copy.deepcopy(p.gt_boxes)
 
         print('generate_bounding_box_labels remove_bg: {}'.format(remove_bg))
         if not remove_bg:
@@ -594,8 +616,8 @@ def train(model, logger, cfg, args, args_cls, args_box):
         if cascade_flag_category[cascade_id]:
             # train the category adaptor
             category_adaptor = category_adaptation.CategoryAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "cls_{}".format(cascade_id)), args_cls)
-            if args.update_proposal:
-            # and cascade_id == 0:
+            # if args.update_proposal:
+            if args.update_proposal and cascade_id != 0:
             # if True:
                 print('update proposal for category at cascade_{}: ignore_scores {}, ignore_ious {}'.format(cascade_id, ignored_scores_ls[cascade_id], ignored_ious_ls[cascade_id]))
                 # prop_s_fg = update_proposal(prop_s_fg, os.path.join(update_feedback_root, "{}_category_fg_{}.json".format(args.sources[0], cascade_id)), len(classes), ignored_ious_ls[cascade_id])
@@ -605,41 +627,21 @@ def train(model, logger, cfg, args, args_cls, args_box):
                 # analyze_proposal(prop_t_fg + prop_t_bg, classes, show_save_dir=os.path.join(gt_pred_show_root, 'target_update'),
                 #     crop_save_dir=target_crop_proposal_save_root, show_scale=0.6, show_flag=show_flag, crop_flag=crop_flag)
                 
-                
-                
-                # 逐条复制生成新list，看是否管用
-                # 作统计图时，查看每个类别剩余的prop数量
 
-                # prop_s_fg_update = update_proposal(prop_s_fg, len(classes), ignored_ious_ls[cascade_id])
-                # prop_s_bg_update = update_proposal(prop_s_bg, len(classes), ignored_ious_ls[cascade_id])
-                # prop_t_fg_update = update_proposal(prop_t_fg, len(classes), ignored_ious_ls[cascade_id])
-                # prop_t_bg_update = update_proposal(prop_t_bg, len(classes), ignored_ious_ls[cascade_id])
+                # map_evaluater_target.reset()
+                # map_evaluater_target.process(prop_t_fg + prop_t_bg, len(classes))
+                # results = map_evaluater_target.evaluate()
+                # print('updated target proposal mAP:')
+                # print(results)
 
-                # print(arrays_equal(prop_s_fg, prop_s_fg_update))
-                # print(arrays_equal(prop_s_bg, prop_s_bg_update))
-                # print(arrays_equal(prop_t_fg, prop_t_fg_update))
-                # print(arrays_equal(prop_t_bg, prop_t_bg_update))
+                # map_evaluater_source.reset()
+                # map_evaluater_source.process(prop_s_fg + prop_s_bg, len(classes))
+                # results = map_evaluater_source.evaluate()
+                # print('updated source proposal mAP:')
+                # print(results)
 
-                # compare_proposals(prop_s_fg, prop_s_fg_update)
-                # compare_proposals(prop_s_bg, prop_s_bg_update)
-                # compare_proposals(prop_t_fg, prop_t_fg_update)
-                # compare_proposals(prop_t_bg, prop_t_bg_update)
 
-                map_evaluater_target.reset()
-                map_evaluater_target.process(prop_t_fg + prop_t_bg, len(classes))
-                results = map_evaluater_target.evaluate()
-                print('updated target proposal mAP:')
-                print(results)
 
-                map_evaluater_source.reset()
-                map_evaluater_source.process(prop_s_fg + prop_s_bg, len(classes))
-                results = map_evaluater_source.evaluate()
-                print('updated source proposal mAP:')
-                print(results)
-
-                # exit()
-
-            
             # if cascade_id == 0:
             #     category_adaptor.load_checkpoint()
             #     data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg, 
@@ -655,6 +657,8 @@ def train(model, logger, cfg, args, args_cls, args_box):
                                                                             ignored_scores=ignored_scores_ls[cascade_id], ignored_ious=ignored_ious_ls[cascade_id])
                 data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg, 
                                                                                 crop_img_dir=target_crop_proposal_save_root)
+                category_adaptor.simply_validate(data_loader_validation, category_adaptor.class_names)
+
                 category_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation)
 
             # generate category labels for each proposals
@@ -667,6 +671,14 @@ def train(model, logger, cfg, args, args_cls, args_box):
                 prop_t_bg, category_adaptor, os.path.join(cache_feedback_root, "{}_bg_{}.json".format(args.targets[0], cascade_id)), 
                 crop_img_dir=target_crop_proposal_save_root, cascade_id=cascade_id, update_score=args.update_score
             )
+            # 评估重新生成的数据
+            print('\ngenerated category results: ......')
+            data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg, 
+                                                                                crop_img_dir=target_crop_proposal_save_root)
+            category_adaptor.simply_validate(data_loader_validation, category_adaptor.class_names)
+
+
+
             prop_t_fg_category = copy.deepcopy(prop_t_fg)
             prop_t_bg_category = copy.deepcopy(prop_t_bg)
             category_adaptor.model.to(torch.device("cpu"))
@@ -677,13 +689,7 @@ def train(model, logger, cfg, args, args_cls, args_box):
             print('generated target proposal mAP:')
             print(results)
 
-            # map_evaluater_source.reset()
-            # map_evaluater_source.process(prop_s_fg + prop_s_bg)
-            # results = map_evaluater_source.evaluate()
-            # print('generated source proposal mAP:')
-            # print(results)
-
-
+        '''
         if args.bbox_refine and cascade_flag_bbox[cascade_id]:
             # train the bbox adaptor
             bbox_adaptor = bbox_adaptation.BoundingBoxAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "bbox_{}".format(cascade_id)), args_box)
@@ -725,16 +731,18 @@ def train(model, logger, cfg, args, args_cls, args_box):
             
             remove_bg_flag = cascade_id == (args.num_cascade - 1)
             
-            # prop_t_fg_refined = generate_bounding_box_labels(
             prop_t_fg = generate_bounding_box_labels(
                 prop_t_fg, bbox_adaptor, classes, os.path.join(cache_feedback_root, "{}_fg_{}.json".format(args.targets[0], cascade_id)), 
                 crop_img_dir=target_crop_proposal_save_root, remove_bg=remove_bg_flag, cascade_id=cascade_id
             )
-            ### prop_t_bg_refined = generate_bounding_box_labels(
-            prop_t_bg = generate_bounding_box_labels(
-                prop_t_bg, bbox_adaptor, classes, os.path.join(cache_feedback_root, "{}_bg_{}.json".format(args.targets[0], cascade_id)), 
-                crop_img_dir=target_crop_proposal_save_root, remove_bg=remove_bg_flag, cascade_id=cascade_id
-            )
+
+
+            # 评估生成后的数据
+            print('\ngenerated bbox results: ......')
+            data_loader_validation = bbox_adaptor.prepare_validation_data(prop_t_fg, crop_img_dir=target_crop_proposal_save_root)
+            bbox_adaptor.simple_validate(data_loader_validation)
+
+
             bbox_adaptor.model.to(torch.device("cpu"))
 
             map_evaluater_target.reset()
@@ -742,18 +750,14 @@ def train(model, logger, cfg, args, args_cls, args_box):
             results = map_evaluater_target.evaluate()
             print('generated target proposal mAP:')
             print(results)
-
-            # map_evaluater_source.reset()
-            # map_evaluater_source.process(prop_s_fg + prop_s_bg)
-            # results = map_evaluater_source.evaluate()
-            # print('generated source proposal mAP:')
-            # print(results)
+        '''
 
 
-    prop_t_fg += prop_t_fg_category
-    prop_t_bg += prop_t_bg_category
+    # prop_t_fg += prop_t_fg_category
+    # prop_t_bg += prop_t_bg_category
 
     # '''
+
     # prop_t_bg = remove_prop_bg(prop_t_bg, os.path.join(update_feedback_root, "{}_bg_rm.json".format(args.targets[0])), len(classes))
     # prop_t_fg = remove_prop_bg(prop_t_fg, os.path.join(update_feedback_root, "{}_fg_rm.json".format(args.targets[0])), len(classes))
     # analyze_proposal(prop_t_fg + prop_t_bg, classes, show_save_dir=os.path.join(gt_pred_show_root, 'target_update2'),
@@ -762,6 +766,7 @@ def train(model, logger, cfg, args, args_cls, args_box):
 
     # remove_bg
     if args.reduce_proposals:
+        print('before train detector, reduce_proposals')
         # remove proposals
         prop_t_bg_new = []
         for p in prop_t_bg:
@@ -769,10 +774,16 @@ def train(model, logger, cfg, args, args_cls, args_box):
             prop_t_bg_new.append(p[keep_indices])
         prop_t_bg = prop_t_bg_new
 
+        score_thresh = 0.96
         prop_t_fg_new = []
         for p in prop_t_fg:
-            prop_t_fg_new.append(p[:20])
+            index = p.pred_scores > score_thresh
+            prop_t_fg_new.append(p[index])
+            # prop_t_fg_new.append(p[:20])
         prop_t_fg = prop_t_fg_new
+
+    analyze_proposal(prop_t_fg, classes, show_save_dir=os.path.join(gt_pred_show_root, 'target_removed_bg'),
+        crop_save_dir=target_crop_proposal_save_root, show_scale=0.6, show_flag=show_flag, crop_flag=crop_flag)
 
     model = model.to(torch.device(cfg.MODEL.DEVICE))
     # Data loading code

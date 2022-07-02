@@ -319,6 +319,20 @@ class BoundingBoxAdaptor:
 
         return ious.avg
 
+    @staticmethod
+    def simple_validate(val_loader) -> float:
+        """call this function if you have labeled data for validation"""
+        ious = AverageMeter("IoU", ":.4e")
+        for i, (images, labels) in enumerate(val_loader):
+            gt_boxes = labels['gt_boxes'].to(device).float()
+            pred_boxes = labels['pred_boxes'].to(device).float()
+            # compute output
+            # pred_deltas = model(images)
+            # _, pred_boxes = box_transform(pred_deltas, pred_classes, pred_boxes)
+            # pred_boxes = clamp(pred_boxes.cpu(), labels['width'], labels['height'])
+            ious.update(iou_between(pred_boxes.cpu(), gt_boxes.cpu()).mean().item(), images.size(0))
+        print(' * IoU {:.3f}'.format(ious.avg))
+
     def fit(self, data_loader_source, data_loader_target, data_loader_validation=None, data_loader_validation_source=None):
         """When no labels exists on target domain, please set data_loader_validation=None"""
         args = self.args
@@ -552,7 +566,7 @@ class BoundingBoxAdaptor:
         parser.add_argument('--momentum', default=0.9, type=float, metavar='M', help='momentum')
         parser.add_argument('--workers-b', default=4, type=int, metavar='N',
                             help='number of data loading workers (default: 2)')
-        parser.add_argument('--epochs-b', default=1, type=int, metavar='N',
+        parser.add_argument('--epochs-b', default=2, type=int, metavar='N',
                             help='number of total epochs to run') # 2
         parser.add_argument('--pretrain-lr-b', default=0.001, type=float,
                             metavar='LR', help='initial learning rate')
@@ -560,7 +574,7 @@ class BoundingBoxAdaptor:
         parser.add_argument('--pretrain-lr-decay-b', default=0.75, type=float, help='parameter for lr scheduler')
         parser.add_argument('--pretrain-weight-decay-b', default=1e-3, type=float,
                             metavar='W', help='weight decay (default: 1e-3)')
-        parser.add_argument('--pretrain-epochs-b', default=1, type=int, metavar='N',
+        parser.add_argument('--pretrain-epochs-b', default=10, type=int, metavar='N',
                             help='number of total epochs to run')   # 10
         parser.add_argument('--iters-per-epoch-b', default=1000, type=int,
                             help='Number of iterations per epoch') # 1000
