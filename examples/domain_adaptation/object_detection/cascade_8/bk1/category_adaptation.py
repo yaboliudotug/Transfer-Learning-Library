@@ -14,7 +14,6 @@ import tqdm
 from typing import List
 from pprint import pprint
 import numpy as np
-import copy
 
 from sklearn.metrics import confusion_matrix
 
@@ -132,10 +131,8 @@ class CategoryAdaptor:
             assert len(ignored_scores) == 2 and ignored_scores[0] <= ignored_scores[1], \
                 "Please provide a range for ignored_scores!"
             for proposals in proposal_list:
-                # keep_indices = ~((ignored_scores[0] < proposals.pred_scores)
-                #                  & (proposals.pred_scores < ignored_scores[1]))
-# !!!!!!!!!!!!!!!!!!!!! xiahangwei xinzeng
-                keep_indices = proposals.pred_scores >= ignored_scores[1]
+                keep_indices = ~((ignored_scores[0] < proposals.pred_scores)
+                                 & (proposals.pred_scores < ignored_scores[1]))
                 filtered_proposals_list.append(proposals[keep_indices])
 
             # calculate confidence threshold for each cateogry on the target domain
@@ -168,7 +165,7 @@ class CategoryAdaptor:
                                 shuffle=True, num_workers=self.args.workers, drop_last=True)
         return dataloader
 
-    def prepare_validation_data_0(self, proposal_list: List[Proposal], crop_img_dir=None):
+    def prepare_validation_data(self, proposal_list: List[Proposal], crop_img_dir=None):
         """call this function if you have labeled data for validation"""
         normalize = T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         transform = T.Compose([
@@ -184,31 +181,6 @@ class CategoryAdaptor:
             filtered_proposals_list.append(proposals[keep_indices])
 
         filtered_proposals_list = flatten(filtered_proposals_list, self.args.max_val)
-        dataset = ProposalDataset(filtered_proposals_list, transform, crop_img_dir=crop_img_dir)
-        dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
-                                shuffle=False, num_workers=self.args.workers, drop_last=False)
-        return dataloader
-
-    def prepare_validation_data(self, proposal_list: List[Proposal], crop_img_dir=None, ignored_scores=None):
-        if ignored_scores is None:
-            ignored_scores = self.args.ignored_scores
-        """call this function if you have labeled data for validation"""
-        normalize = T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        transform = T.Compose([
-            ResizeImage(self.args.resize_size), 
-            T.ToTensor(),
-            normalize
-        ])
-
-        # remove proposals with ignored classes
-        # filtered_proposals_list = []
-        for proposals in proposal_list:
-            # keep_indices = proposals.gt_classes != -1
-            # filtered_proposals_list.append(proposals[keep_indices])
-            proposals.gt_classes = copy.deepcopy(proposals.gt_fg_classes)
-
-
-        filtered_proposals_list = flatten(proposal_list)
         dataset = ProposalDataset(filtered_proposals_list, transform, crop_img_dir=crop_img_dir)
         dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
                                 shuffle=False, num_workers=self.args.workers, drop_last=False)
@@ -299,12 +271,7 @@ class CategoryAdaptor:
                         labels_t['pred_scores'].numpy().tolist()
                     )
                 )
-                selected = torch.tensor([True for j in range(len(labels_t['pred_classes']))])
-                
-                filter_threshold = 0.9
-                selected = torch.tensor([one_score >= filter_threshold for one_score in labels_t['pred_scores'].numpy().tolist()])
-                
-
+                # print(selected.shape, sum(selected))
                 pseudo_classes_t = selected * labels_t['pred_classes'] + (~selected) * -1
                 pseudo_classes_t = pseudo_classes_t.to(device)
 
@@ -404,20 +371,12 @@ class CategoryAdaptor:
         pred_true_score_dict_mean = [[] for i in range(len(class_names) + 1)]
         pred_true_score_dict_max = [[] for i in range(len(class_names) + 1)]
         pred_true_score_dict_min = [[] for i in range(len(class_names) + 1)]
-        pred_true_iou_dict = [[] for i in range(len(class_names) + 1)]
-        pred_true_iou_dict_mean = [[] for i in range(len(class_names) + 1)]
-        pred_true_iou_dict_max = [[] for i in range(len(class_names) + 1)]
-        pred_true_iou_dict_min = [[] for i in range(len(class_names) + 1)]
         for i in range(len(class_names) + 1):
             pred_true_class_dict[i] = [0 for j in range(len(class_names) + 1)]
             pred_true_score_dict_mean[i] = [0 for j in range(len(class_names) + 1)]
             pred_true_score_dict[i] = [[] for j in range(len(class_names) + 1)]
             pred_true_score_dict_max[i] = [0 for j in range(len(class_names) + 1)]
             pred_true_score_dict_min[i] = [0 for j in range(len(class_names) + 1)]
-            pred_true_iou_dict[i] = [[] for i in range(len(class_names) + 1)]
-            pred_true_iou_dict_mean[i] = [[] for i in range(len(class_names) + 1)]
-            pred_true_iou_dict_max[i] = [[] for i in range(len(class_names) + 1)]
-            pred_true_iou_dict_min[i] = [[] for i in range(len(class_names) + 1)]
 
 
         with torch.no_grad():
@@ -425,7 +384,6 @@ class CategoryAdaptor:
             for i, (images, labels) in enumerate(val_loader):
                 images = images.to(device)
                 gt_classes = labels['gt_classes'].to(device)
-                gt_ious = labels['gt_ious'].to(device)
 
                 # compute output
                 output = model(images)
@@ -443,13 +401,7 @@ class CategoryAdaptor:
                 pred_scores = pred_scores.max(1)[0]
 
                 for j in range(len(pred_classes)):
-                    # print(j)
-                    # print(gt_ious)
-                    # print(gt_ious[j].cpu())
-                    # print(int(pred_classes[j].cpu()), int(gt_classes[j].cpu()))
-                    # print(np.array(pred_true_iou_dict).shape)
                     pred_true_score_dict[int(pred_classes[j].cpu())][int(gt_classes[j].cpu())].append(float(pred_scores[j].cpu()))
-                    pred_true_iou_dict[int(pred_classes[j].cpu())][int(gt_classes[j].cpu())].append(float(gt_ious[j].cpu()))
                     pred_true_class_dict[int(pred_classes[j].cpu())][int(gt_classes[j].cpu())] += 1
 
 
@@ -470,7 +422,6 @@ class CategoryAdaptor:
                 for j in range(len(class_names) + 1):
                     if len(pred_true_score_dict[i][j]) == 0:
                         pred_true_score_dict[i][j] = [0]
-                        pred_true_iou_dict[i][j] = [0]
                         # pred_true_score_dict_mean[i][j] = [0]
                     # else:
                     pred_true_score_dict_mean[i][j] = sum(pred_true_score_dict[i][j]) / len(pred_true_score_dict[i][j])
@@ -478,28 +429,12 @@ class CategoryAdaptor:
                     pred_true_score_dict_max[i][j] = round(max(pred_true_score_dict[i][j]), 2)
                     pred_true_score_dict_min[i][j] = round(min(pred_true_score_dict[i][j]), 2)
 
-                    pred_true_iou_dict_mean[i][j] = sum(pred_true_iou_dict[i][j]) / len(pred_true_iou_dict[i][j])
-                    pred_true_iou_dict_mean[i][j] = round(pred_true_iou_dict_mean[i][j], 2)
-                    pred_true_iou_dict_max[i][j] = round(max(pred_true_iou_dict[i][j]), 2)
-                    pred_true_iou_dict_min[i][j] = round(min(pred_true_iou_dict[i][j]), 2)
-
             pred_true_score_dict_mean = np.array(pred_true_score_dict_mean)
             pred_true_score_dict_min = np.array(pred_true_score_dict_min)
             pred_true_score_dict_max = np.array(pred_true_score_dict_max)
-
-            pred_true_iou_dict_mean = np.array(pred_true_iou_dict_mean)
-            pred_true_iou_dict_min = np.array(pred_true_iou_dict_min)
-            pred_true_iou_dict_max = np.array(pred_true_iou_dict_max)
-
-            print('------ scores ------')
             pprint(pred_true_score_dict_mean)
             pprint(pred_true_score_dict_min)
             pprint(pred_true_score_dict_max)
-
-            print('------ iou ------')
-            pprint(pred_true_iou_dict_mean)
-            pprint(pred_true_iou_dict_min)
-            pprint(pred_true_iou_dict_max)
 
         return top1.avg
 
@@ -511,31 +446,20 @@ class CategoryAdaptor:
         pred_true_score_dict_mean = [[] for i in range(len(class_names) + 1)]
         pred_true_score_dict_max = [[] for i in range(len(class_names) + 1)]
         pred_true_score_dict_min = [[] for i in range(len(class_names) + 1)]
-        pred_true_iou_dict = [[] for i in range(len(class_names) + 1)]
-        pred_true_iou_dict_mean = [[] for i in range(len(class_names) + 1)]
-        pred_true_iou_dict_max = [[] for i in range(len(class_names) + 1)]
-        pred_true_iou_dict_min = [[] for i in range(len(class_names) + 1)]
-        
         for i in range(len(class_names) + 1):
             pred_true_class_dict[i] = [0 for j in range(len(class_names) + 1)]
-            pred_true_score_dict[i] = [[] for j in range(len(class_names) + 1)]
             pred_true_score_dict_mean[i] = [0 for j in range(len(class_names) + 1)]
+            pred_true_score_dict[i] = [[] for j in range(len(class_names) + 1)]
             pred_true_score_dict_max[i] = [0 for j in range(len(class_names) + 1)]
             pred_true_score_dict_min[i] = [0 for j in range(len(class_names) + 1)]
-            pred_true_iou_dict[i] = [[] for j in range(len(class_names) + 1)]
-            pred_true_iou_dict_mean[i] = [0 for j in range(len(class_names) + 1)]
-            pred_true_iou_dict_max[i] = [0 for j in range(len(class_names) + 1)]
-            pred_true_iou_dict_min[i] = [0 for j in range(len(class_names) + 1)]
 
         for i, (images, labels) in enumerate(val_loader):
             gt_classes = labels['gt_classes'].to(device)
-            gt_ious = labels['gt_ious'].to(device)
             pred_classes = labels['pred_classes'].to(device)
             pred_scores = labels['pred_scores'].to(device)
             confmat.update(gt_classes, pred_classes)
             for j in range(len(pred_classes)):
                 pred_true_score_dict[int(pred_classes[j].cpu())][int(gt_classes[j].cpu())].append(float(pred_scores[j].cpu()))
-                pred_true_iou_dict[int(pred_classes[j].cpu())][int(gt_classes[j].cpu())].append(float(gt_ious[j].cpu()))
                 pred_true_class_dict[int(pred_classes[j].cpu())][int(gt_classes[j].cpu())] += 1
 
         pprint(confmat.format(class_names+["bg"]))
@@ -547,34 +471,20 @@ class CategoryAdaptor:
             for j in range(len(class_names) + 1):
                 if len(pred_true_score_dict[i][j]) == 0:
                     pred_true_score_dict[i][j] = [0]
-                    pred_true_iou_dict[i][j] = [0]
+                    # pred_true_score_dict_mean[i][j] = [0]
+                # else:
                 pred_true_score_dict_mean[i][j] = sum(pred_true_score_dict[i][j]) / len(pred_true_score_dict[i][j])
                 pred_true_score_dict_mean[i][j] = round(pred_true_score_dict_mean[i][j], 2)
                 pred_true_score_dict_max[i][j] = round(max(pred_true_score_dict[i][j]), 2)
                 pred_true_score_dict_min[i][j] = round(min(pred_true_score_dict[i][j]), 2)
-                
-                pred_true_iou_dict_mean[i][j] = sum(pred_true_iou_dict[i][j]) / len(pred_true_iou_dict[i][j])
-                pred_true_iou_dict_mean[i][j] = round(pred_true_iou_dict_mean[i][j], 2)
-                pred_true_iou_dict_max[i][j] = round(max(pred_true_iou_dict[i][j]), 2)
-                pred_true_iou_dict_min[i][j] = round(min(pred_true_iou_dict[i][j]), 2)
 
 
         pred_true_score_dict_mean = np.array(pred_true_score_dict_mean)
         pred_true_score_dict_min = np.array(pred_true_score_dict_min)
         pred_true_score_dict_max = np.array(pred_true_score_dict_max)
-
-        pred_true_iou_dict_mean = np.array(pred_true_iou_dict_mean)
-        pred_true_iou_dict_min = np.array(pred_true_iou_dict_min)
-        pred_true_iou_dict_max = np.array(pred_true_iou_dict_max)
-
-        print('------ scores ------')
         pprint(pred_true_score_dict_mean)
         pprint(pred_true_score_dict_min)
         pprint(pred_true_score_dict_max)
-        print('------ iou ------')
-        pprint(pred_true_iou_dict_mean)
-        pprint(pred_true_iou_dict_min)
-        pprint(pred_true_iou_dict_max)
 
 
     @staticmethod
@@ -622,9 +532,9 @@ class CategoryAdaptor:
                             dest='weight_decay')
         parser.add_argument('--workers-c', default=4, type=int, metavar='N',
                             help='number of data loading workers (default: 2)')
-        parser.add_argument('--epochs-c', default=1, type=int, metavar='N',
+        parser.add_argument('--epochs-c', default=10, type=int, metavar='N',
                             help='number of total epochs to run')   # 10
-        parser.add_argument('--iters-per-epoch-c', default=100, type=int,
+        parser.add_argument('--iters-per-epoch-c', default=1000, type=int,
                             help='Number of iterations per epoch') # 1000
         parser.add_argument('--print-freq-c', default=100, type=int,
                             metavar='N', help='print frequency (default: 100)')

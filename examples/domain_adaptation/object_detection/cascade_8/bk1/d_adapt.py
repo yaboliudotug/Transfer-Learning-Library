@@ -16,9 +16,9 @@ from turtle import clone
 import numpy as np
 import cv2
 from regex import L
-from sklearn import multiclass
 import tqdm
 import copy
+# import copy
 
 import torch
 import torch.multiprocessing
@@ -48,91 +48,9 @@ import utils
 from utils import PascalVOCDetectionPerClassEvaluatorMAP
 
 import category_adaptation
-import category_adaptation_fgbg
 import bbox_adaptation
 
 import matplotlib.pyplot as plt 
-
-
-def proposal_validate(proposal_list, class_names, score_threshold=[0, 0]):
-    
-    pred_true_class_dict = [[] for i in range(len(class_names) + 1)]
-    pred_true_score_dict = [[] for i in range(len(class_names) + 1)]
-    pred_true_score_dict_mean = [[] for i in range(len(class_names) + 1)]
-    pred_true_score_dict_max = [[] for i in range(len(class_names) + 1)]
-    pred_true_score_dict_min = [[] for i in range(len(class_names) + 1)]
-    pred_true_iou_dict = [[] for i in range(len(class_names) + 1)]
-    pred_true_iou_dict_mean = [[] for i in range(len(class_names) + 1)]
-    pred_true_iou_dict_max = [[] for i in range(len(class_names) + 1)]
-    pred_true_iou_dict_min = [[] for i in range(len(class_names) + 1)]
-    
-    for i in range(len(class_names) + 1):
-        pred_true_class_dict[i] = [0 for j in range(len(class_names) + 1)]
-        pred_true_score_dict[i] = [[] for j in range(len(class_names) + 1)]
-        pred_true_score_dict_mean[i] = [0 for j in range(len(class_names) + 1)]
-        pred_true_score_dict_max[i] = [0 for j in range(len(class_names) + 1)]
-        pred_true_score_dict_min[i] = [0 for j in range(len(class_names) + 1)]
-        pred_true_iou_dict[i] = [[] for j in range(len(class_names) + 1)]
-        pred_true_iou_dict_mean[i] = [0 for j in range(len(class_names) + 1)]
-        pred_true_iou_dict_max[i] = [0 for j in range(len(class_names) + 1)]
-        pred_true_iou_dict_min[i] = [0 for j in range(len(class_names) + 1)]
-
-    # proposals = flatten(proposal_list)
-    # print('###########', len(proposals))
-    new_proposal_list = []
-    for proposal in proposal_list:
-        # index = proposal.gt_classes != -1
-        index = proposal.pred_scores >= score_threshold[1]
-        new_proposal_list.append(proposal[index])
-    proposals = flatten(new_proposal_list)
-    for proposal in proposals:
-        pred_classes = proposal.pred_classes.astype(np.long)
-        pred_scores = proposal.pred_scores.astype(np.float)
-        gt_classes = proposal.gt_classes.astype(np.long)
-        gt_ious = proposal.gt_ious.astype(np.float)
-
-        for j in range(len(pred_classes)):
-            pred_true_score_dict[int(pred_classes[j])][int(gt_classes[j])].append(float(pred_scores[j]))
-            pred_true_iou_dict[int(pred_classes[j])][int(gt_classes[j])].append(float(gt_ious[j]))
-            pred_true_class_dict[int(pred_classes[j])][int(gt_classes[j])] += 1
-
-    pred_true_class_dict = np.array(pred_true_class_dict)
-    pprint.pprint(pred_true_class_dict)
-    
-    for i in range(len(class_names) + 1):
-        for j in range(len(class_names) + 1):
-            if len(pred_true_score_dict[i][j]) == 0:
-                pred_true_score_dict[i][j] = [0]
-                pred_true_iou_dict[i][j] = [0]
-            pred_true_score_dict_mean[i][j] = sum(pred_true_score_dict[i][j]) / len(pred_true_score_dict[i][j])
-            pred_true_score_dict_mean[i][j] = round(pred_true_score_dict_mean[i][j], 2)
-            pred_true_score_dict_max[i][j] = round(max(pred_true_score_dict[i][j]), 2)
-            pred_true_score_dict_min[i][j] = round(min(pred_true_score_dict[i][j]), 2)
-            
-            pred_true_iou_dict_mean[i][j] = sum(pred_true_iou_dict[i][j]) / len(pred_true_iou_dict[i][j])
-            pred_true_iou_dict_mean[i][j] = round(pred_true_iou_dict_mean[i][j], 2)
-            pred_true_iou_dict_max[i][j] = round(max(pred_true_iou_dict[i][j]), 2)
-            pred_true_iou_dict_min[i][j] = round(min(pred_true_iou_dict[i][j]), 2)
-
-
-    pred_true_score_dict_mean = np.array(pred_true_score_dict_mean)
-    pred_true_score_dict_min = np.array(pred_true_score_dict_min)
-    pred_true_score_dict_max = np.array(pred_true_score_dict_max)
-
-    pred_true_iou_dict_mean = np.array(pred_true_iou_dict_mean)
-    pred_true_iou_dict_min = np.array(pred_true_iou_dict_min)
-    pred_true_iou_dict_max = np.array(pred_true_iou_dict_max)
-
-    print('------ scores ------')
-    pprint.pprint(pred_true_score_dict_mean)
-    pprint.pprint(pred_true_score_dict_min)
-    pprint.pprint(pred_true_score_dict_max)
-    print('------ iou ------')
-    pprint.pprint(pred_true_iou_dict_mean)
-    pprint.pprint(pred_true_iou_dict_min)
-    pprint.pprint(pred_true_iou_dict_max)
-
-
 
 def statistic_proposal(proposals, save_path):
     class_iou_dict = {}
@@ -299,22 +217,6 @@ def analyze_proposal(proposal_list, class_names, show_save_dir, crop_save_dir, s
         if show_count > 20:
             break
 
-def multiclass2fgbg(prop, num_classes):
-    new_proposals_list = PersistentProposalList()
-    for p in prop:
-        fg_index = (-1 < p.gt_classes) & (p.gt_classes < num_classes)
-        bg_index = p.gt_classes == num_classes
-        p.gt_classes[fg_index] = 0
-        p.gt_classes[bg_index] = 1
-
-        fg_index = (-1 < p.pred_classes) & (p.pred_classes < num_classes)
-        bg_index = p.pred_classes == num_classes
-        p.pred_classes[fg_index] = 0
-        p.pred_classes[bg_index] = 1
-
-        new_proposals_list.append(p)
-        # print(p)
-    return new_proposals_list
 
 def generate_proposals(model, num_classes, dataset_names, cache_root, cfg):
     """Generate foreground proposals and background proposals from `model` and save them to the disk"""
@@ -354,14 +256,11 @@ def generate_proposals_only_inference(model, num_classes, dataset_names, cache_r
 def generate_category_labels(prop, category_adaptor, cache_filename, crop_img_dir=None, cascade_id=0, update_score=False):
     """Generate category labels for each proposals in `prop` and save them to the disk"""
     force_pred_to_gt_onlybg = False
-    force_pred_to_gt = True
-    test_mode1 = False
+    force_pred_to_gt = False
     if force_pred_to_gt:
         print('Force pred to gt category ......')
     if update_score:
         print('update category scores ......')
-    if test_mode1:
-        print('update category scores with test mode 1 ......')
     prop_w_category = PersistentProposalList(cache_filename)
     # if cascade_id == 0:
     #     prop_w_category.load()
@@ -375,7 +274,7 @@ def generate_category_labels(prop, category_adaptor, cache_filename, crop_img_di
             data_loader_test = category_adaptor.prepare_test_data(flatten(prop_w_category), crop_img_dir=crop_img_dir)
             predictions, scores = category_adaptor.predict(data_loader_test)
         for p in prop_w_category:
-            if not force_pred_to_gt and not force_pred_to_gt_onlybg and not test_mode1:
+            if not force_pred_to_gt and not force_pred_to_gt_onlybg:
                 # print('normal update category ...... ')
                 p.pred_classes = np.array([predictions.popleft() for _ in range(len(p))])
             if force_pred_to_gt:
@@ -392,29 +291,12 @@ def generate_category_labels(prop, category_adaptor, cache_filename, crop_img_di
                 # p.pred_classes[p.gt_classes == 6] = 6
                 # p.pred_classes[p.gt_classes == 7] = 7
                 p.pred_classes[p.gt_classes == 8] = 8
-            if test_mode1:
-                pass
 
             if update_score:
                 p.pred_scores = np.array([scores.popleft() for _ in range(len(p))])
         prop_w_category.flush()
     return prop_w_category
 
-def generate_bounding_box_labels_ori(prop, bbox_adaptor, class_names, cache_filename):
-    """Generate bounding box labels for each proposals in `prop` and save them to the disk"""
-    prop_w_bbox = PersistentProposalList(cache_filename)
-    if not prop_w_bbox.load():
-        # remove (predicted) background proposals
-        for p in prop:
-            keep_indices = (0 <= p.pred_classes) & (p.pred_classes < len(class_names))
-            prop_w_bbox.append(p[keep_indices])
-
-        data_loader_test = bbox_adaptor.prepare_test_data(flatten(prop_w_bbox))
-        predictions = bbox_adaptor.predict(data_loader_test)
-        for p in prop_w_bbox:
-            p.pred_boxes = np.array([predictions.popleft() for _ in range(len(p))])
-        prop_w_bbox.flush()
-    return prop_w_bbox
 
 def generate_bounding_box_labels_0(prop, bbox_adaptor, class_names, cache_filename, crop_img_dir=None, remove_bg=False):
     """Generate bounding box labels for each proposals in `prop` and save them to the disk"""
@@ -650,8 +532,8 @@ def train(model, logger, cfg, args, args_cls, args_box):
     model = model.to(torch.device('cpu'))
 
 
-    show_flag = False
-    # show_flag = True
+    # show_flag = False
+    show_flag = True
     crop_flag = True
     gt_pred_show_root = os.path.join(cfg.OUTPUT_DIR, "cache", "show_gt_pred")
     crop_proposal_save_root = os.path.join(cfg.OUTPUT_DIR, "cache", "crop_propals")
@@ -716,9 +598,6 @@ def train(model, logger, cfg, args, args_cls, args_box):
     # print(results)
 
     # '''
-    print('Validate proposal at begining ......')
-    proposal_validate(prop_t_fg + prop_t_bg, classes, score_threshold=ignored_scores_ls[0])
-    # for cascade_id in range(0):
     for cascade_id in range(args.num_cascade):
         print('\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
         print('>>>>>>>>>>> Cascade Phase {} >>>>>>>>>>>'.format(cascade_id))
@@ -735,44 +614,10 @@ def train(model, logger, cfg, args, args_cls, args_box):
                                 crop_save_dir=target_crop_proposal_save_root, show_scale=0.6, show_flag=show_flag, crop_flag=crop_flag)
 
         if cascade_flag_category[cascade_id]:
-
-
-
-            ### new fb bg category adaptor
-
-            # category_adaptor = category_adaptation_fgbg.CategoryAdaptorFGBG(['fg'], os.path.join(cfg.OUTPUT_DIR, "cls_fgbg_{}".format(cascade_id)), args_cls)
-            # prop_s_fg = multiclass2fgbg(prop_s_fg, len(classes))
-            # prop_s_bg = multiclass2fgbg(prop_s_bg, len(classes))
-            # prop_t_fg = multiclass2fgbg(prop_t_fg, len(classes))
-            # prop_t_bg = multiclass2fgbg(prop_t_bg, len(classes))
-            # if not category_adaptor.load_checkpoint():
-            # # if True:
-            #     data_loader_source = category_adaptor.prepare_training_data(prop_s_fg + prop_s_bg, True, crop_img_dir=source_crop_proposal_save_root, 
-            #                                                                 ignored_scores=ignored_scores_ls[cascade_id], ignored_ious=ignored_ious_ls[cascade_id])
-            #     data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False, crop_img_dir=target_crop_proposal_save_root,
-            #                                                                 ignored_scores=ignored_scores_ls[cascade_id], ignored_ious=ignored_ious_ls[cascade_id])
-            #     data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg, 
-            #                                                                     crop_img_dir=target_crop_proposal_save_root)
-            #     category_adaptor.simply_validate(data_loader_validation, category_adaptor.class_names)
-
-            #     category_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation)
-
-
-
-
-
-
-
-
-
-
-
-
-
             # train the category adaptor
             category_adaptor = category_adaptation.CategoryAdaptor(classes, os.path.join(cfg.OUTPUT_DIR, "cls_{}".format(cascade_id)), args_cls)
-            if args.update_proposal:
-            # if args.update_proposal and cascade_id != 0:
+            # if args.update_proposal:
+            if args.update_proposal and cascade_id != 0:
             # if True:
                 print('update proposal for category at cascade_{}: ignore_scores {}, ignore_ious {}'.format(cascade_id, ignored_scores_ls[cascade_id], ignored_ious_ls[cascade_id]))
                 # prop_s_fg = update_proposal(prop_s_fg, os.path.join(update_feedback_root, "{}_category_fg_{}.json".format(args.sources[0], cascade_id)), len(classes), ignored_ious_ls[cascade_id])
@@ -810,42 +655,39 @@ def train(model, logger, cfg, args, args_cls, args_box):
                                                                             ignored_scores=ignored_scores_ls[cascade_id], ignored_ious=ignored_ious_ls[cascade_id])
                 data_loader_target = category_adaptor.prepare_training_data(prop_t_fg + prop_t_bg, False, crop_img_dir=target_crop_proposal_save_root,
                                                                             ignored_scores=ignored_scores_ls[cascade_id], ignored_ious=ignored_ious_ls[cascade_id])
-                # data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg, 
-                #                                                                 crop_img_dir=target_crop_proposal_save_root)
-                data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg, crop_img_dir=target_crop_proposal_save_root,
-                                                                            ignored_scores=ignored_scores_ls[cascade_id])                                                                
+                data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg, 
+                                                                                crop_img_dir=target_crop_proposal_save_root)
                 category_adaptor.simply_validate(data_loader_validation, category_adaptor.class_names)
 
                 category_adaptor.fit(data_loader_source, data_loader_target, data_loader_validation)
 
-            # # generate category labels for each proposals
-            # cache_feedback_root = os.path.join(cfg.OUTPUT_DIR, "cache", "feedback")
-            # prop_t_fg = generate_category_labels(
-            #     prop_t_fg, category_adaptor, os.path.join(cache_feedback_root, "{}_fg_{}.json".format(args.targets[0], cascade_id)), 
-            #     crop_img_dir=target_crop_proposal_save_root, cascade_id=cascade_id, update_score=args.update_score
-            # )
-            # prop_t_bg = generate_category_labels(
-            #     prop_t_bg, category_adaptor, os.path.join(cache_feedback_root, "{}_bg_{}.json".format(args.targets[0], cascade_id)), 
-            #     crop_img_dir=target_crop_proposal_save_root, cascade_id=cascade_id, update_score=args.update_score
-            # )
-            # # 评估重新生成的数据
-            # print('\ngenerated category results: ......')
-            # data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg, 
-            #                                                                     crop_img_dir=target_crop_proposal_save_root)
-            # category_adaptor.simply_validate(data_loader_validation, category_adaptor.class_names)
-            # proposal_validate(prop_t_fg + prop_t_bg, classes)
+            # generate category labels for each proposals
+            cache_feedback_root = os.path.join(cfg.OUTPUT_DIR, "cache", "feedback")
+            prop_t_fg = generate_category_labels(
+                prop_t_fg, category_adaptor, os.path.join(cache_feedback_root, "{}_fg_{}.json".format(args.targets[0], cascade_id)), 
+                crop_img_dir=target_crop_proposal_save_root, cascade_id=cascade_id, update_score=args.update_score
+            )
+            prop_t_bg = generate_category_labels(
+                prop_t_bg, category_adaptor, os.path.join(cache_feedback_root, "{}_bg_{}.json".format(args.targets[0], cascade_id)), 
+                crop_img_dir=target_crop_proposal_save_root, cascade_id=cascade_id, update_score=args.update_score
+            )
+            # 评估重新生成的数据
+            print('\ngenerated category results: ......')
+            data_loader_validation = category_adaptor.prepare_validation_data(prop_t_fg + prop_t_bg, 
+                                                                                crop_img_dir=target_crop_proposal_save_root)
+            category_adaptor.simply_validate(data_loader_validation, category_adaptor.class_names)
 
 
 
-            # prop_t_fg_category = copy.deepcopy(prop_t_fg)
-            # prop_t_bg_category = copy.deepcopy(prop_t_bg)
-            # category_adaptor.model.to(torch.device("cpu"))
+            prop_t_fg_category = copy.deepcopy(prop_t_fg)
+            prop_t_bg_category = copy.deepcopy(prop_t_bg)
+            category_adaptor.model.to(torch.device("cpu"))
 
-            # map_evaluater_target.reset()
-            # map_evaluater_target.process(prop_t_fg + prop_t_bg, num_classes=len(classes))
-            # results = map_evaluater_target.evaluate()
-            # print('generated target proposal mAP:')
-            # print(results)
+            map_evaluater_target.reset()
+            map_evaluater_target.process(prop_t_fg + prop_t_bg, num_classes=len(classes))
+            results = map_evaluater_target.evaluate()
+            print('generated target proposal mAP:')
+            print(results)
 
         '''
         if args.bbox_refine and cascade_flag_bbox[cascade_id]:
@@ -921,7 +763,7 @@ def train(model, logger, cfg, args, args_cls, args_box):
     # analyze_proposal(prop_t_fg + prop_t_bg, classes, show_save_dir=os.path.join(gt_pred_show_root, 'target_update2'),
     #     crop_save_dir=target_crop_proposal_save_root, show_scale=0.6, show_flag=show_flag, crop_flag=crop_flag)
 
-    score_thresh = 0.9
+
     # remove_bg
     if args.reduce_proposals:
         print('before train detector, reduce_proposals')
@@ -932,28 +774,13 @@ def train(model, logger, cfg, args, args_cls, args_box):
             prop_t_bg_new.append(p[keep_indices])
         prop_t_bg = prop_t_bg_new
 
-        
+        score_thresh = 0.96
         prop_t_fg_new = []
         for p in prop_t_fg:
-            # index = p.pred_scores > score_thresh
-            # prop_t_fg_new.append(p[index])
-            prop_t_fg_new.append(p[:20])
-        prop_t_fg = prop_t_fg_new
-
-    filter_scores = True
-    if filter_scores:
-        print('filter scores final proposals with threshhold {}'.format(score_thresh))
-        prop_t_fg_new = []
-        for p in prop_t_fg:
-            index = (p.pred_scores > score_thresh) & (p.gt_ious > 0.7)
+            index = p.pred_scores > score_thresh
             prop_t_fg_new.append(p[index])
+            # prop_t_fg_new.append(p[:20])
         prop_t_fg = prop_t_fg_new
-
-        prop_t_bg_new = []
-        for p in prop_t_bg:
-            index = (p.pred_scores > score_thresh) & (p.gt_ious < 0.4)
-            prop_t_bg_new.append(p[index])
-        prop_t_bg = prop_t_bg_new
 
     analyze_proposal(prop_t_fg, classes, show_save_dir=os.path.join(gt_pred_show_root, 'target_removed_bg'),
         crop_save_dir=target_crop_proposal_save_root, show_scale=0.6, show_flag=show_flag, crop_flag=crop_flag)
