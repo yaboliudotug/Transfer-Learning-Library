@@ -69,18 +69,15 @@
 #   -s Cityscapes ../datasets/cityscapes_in_voc -t FoggyCityscapes ../datasets/foggy_cityscapes_in_voc/  \
 #   --test FoggyCityscapesTest ../datasets/foggy_cityscapes_in_voc/ --finetune --trade-off 0.5 --bbox-refine \
 #   OUTPUT_DIR logs/faster_rcnn_R_101_C4/cityscapes2foggy/phase1 MODEL.WEIGHTS ${pretrained_models} SEED 0
-# --confidence-ratio-c 0.05 能够达到40.6 map
+# --confidence-ratio-c 0.05 能够达到40.6map
  #--confidence-ratio-c 0.05 \
 
 pretrained_models=../logs/source_only/faster_rcnn_R_101_C4/cityscapes2foggy_cache/model_0029999.pth
-CUDA_VISIBLE_DEVICES=0 python d_adapt.py --num-gpus 1 --workers-c 4 --max-train-c 20 --ignored-scores-c 0.05 0.5  \
+CUDA_VISIBLE_DEVICES=1 python d_adapt.py --num-gpus 1 --workers-c 4 --max-train-c 20 --ignored-scores-c 0.05 0.5  \
   --config-file config/faster_rcnn_R_101_C4_cityscapes.yaml --use-pre-cache 1 --use-pre-crop 1 --update-score 0 --update-proposal 0 \
   -s Cityscapes ../datasets/cityscapes_in_voc -t FoggyCityscapes ../datasets/foggy_cityscapes_in_voc/  \
   --test FoggyCityscapesTest ../datasets/foggy_cityscapes_in_voc/ --finetune --trade-off 0.5 --bbox-refine \
-  OUTPUT_DIR logs/faster_rcnn_R_101_C4/cityscapes2foggy_debug_test_new_2/phase1 MODEL.WEIGHTS ${pretrained_models} SEED 0
-
-# [0.3,0.7],[0.35,0.6],[0.4,0.5] 尝试该逐步分类方案
-  # OUTPUT_DIR logs/faster_rcnn_R_101_C4/cityscapes2foggy_test_0/phase1 MODEL.WEIGHTS ${pretrained_models} SEED 0
+  OUTPUT_DIR logs/faster_rcnn_R_101_C4/cityscapes2foggy_debug4/phase1 MODEL.WEIGHTS ${pretrained_models} SEED 0
 
 # # 42.4
 # pretrained_models=logs/faster_rcnn_R_101_C4/cityscapes2foggy/phase1/model_final.pth
