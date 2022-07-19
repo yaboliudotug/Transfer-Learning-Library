@@ -203,12 +203,10 @@ class ProposalGenerator(DatasetEvaluator):
         pred_boxes = output_instance.pred_boxes
         pred_scores = output_instance.scores
         pred_classes = output_instance.pred_classes
-        pred_ious = output_instance.iou_ness
         
         pred_boxes_np = pred_boxes.tensor.numpy()
         pred_classes_np = pred_classes.numpy()
         pred_scores_np = pred_scores.numpy()
-        pred_ious_np = pred_ious.numpy()
 
         filter_bboxs = False
         min_bbox_length = 12
@@ -216,11 +214,9 @@ class ProposalGenerator(DatasetEvaluator):
             pred_boxes_ls = pred_boxes_np.tolist()
             pred_classes_ls = pred_classes_np.tolist()
             pred_scores_ls = pred_scores_np.tolist()
-            pred_ious_ls = pred_ious_np.tolist()
             pred_boxes_ls_new = []
             pred_classes_ls_new = []
             pred_scores_ls_new = []
-            pred_ious_ls_new = []
             for i in range(len(pred_boxes_ls)):
                 x1, y1, x2, y2 = pred_boxes_ls[i]
                 if abs(x2 - x1) < min_bbox_length or abs(y2 - y1) < min_bbox_length:
@@ -228,11 +224,9 @@ class ProposalGenerator(DatasetEvaluator):
                 pred_boxes_ls_new.append([x1, y1, x2, y2])
                 pred_classes_ls_new.append(pred_classes_ls[i])
                 pred_scores_ls_new.append(pred_scores_ls[i])
-                pred_ious_ls_new.append(pred_ious_ls[i])
             pred_boxes_np = np.array(pred_boxes_ls_new)
             pred_classes_np = np.array(pred_classes_ls_new)
             pred_scores_np = np.array(pred_scores_ls_new)
-            pred_ious_np = np.array(pred_ious_ls_new)
             
         proposal = Proposal(
             image_id=inputs[0]['image_id'],
@@ -242,8 +236,7 @@ class ProposalGenerator(DatasetEvaluator):
             pred_scores=pred_scores_np,
             height = height,
             width = width,
-            fb_set = type,
-            pred_ious=pred_ious_np,
+            fb_set = type
         )
         pred_boxes = Boxes(pred_boxes_np)
 
@@ -445,7 +438,7 @@ class Proposal:
     """
     def __init__(self, image_id, filename, pred_boxes, pred_classes, pred_scores,
                  gt_classes=None, gt_boxes=None, gt_ious=None, gt_fg_classes=None, 
-                 all_gt_classes=None, all_gt_boxes=None, pred_ids=None, height=None, width=None, fb_set=None, pred_ious=None):
+                 all_gt_classes=None, all_gt_boxes=None, pred_ids=None, height=None, width=None, fb_set=None):
         self.image_id = image_id
         self.filename = filename
         self.pred_boxes = pred_boxes
@@ -461,7 +454,6 @@ class Proposal:
         self.height = height
         self.width = width
         self.fb_set = fb_set
-        self.pred_ious = pred_ious
     def to_dict(self):
         return {
             "__proposal__": True,
@@ -479,8 +471,7 @@ class Proposal:
             "pred_ids": self.pred_ids.tolist(),
             "height": self.height,
             "width": self.width,
-            "fb_set": self.fb_set,
-            "pred_ious": self.pred_ious.tolist(),
+            "fb_set": self.fb_set
         }
     def keys(self):
         return [
@@ -500,7 +491,6 @@ class Proposal:
             "height",
             "width",
             "fb_set",
-            "pred_ious"
         ]
 
     def __str__(self):
@@ -527,8 +517,7 @@ class Proposal:
             pred_ids=self.pred_ids[item],
             height=self.height,
             width=self.width,
-            fb_set=self.fb_set,
-            pred_ious=self.pred_ious[item],
+            fb_set=self.fb_set
         )
 
     def extend_0(self, proposal):
@@ -573,11 +562,6 @@ class Proposal:
             self.pred_scores = np.concatenate([self.pred_scores, proposal.pred_scores])
         elif len(proposal.pred_scores):
             self.pred_scores = proposal.pred_scores
-
-        if len(self.pred_ious) and len(proposal.pred_ious):
-            self.pred_ious = np.concatenate([self.pred_ious, proposal.pred_ious])
-        elif len(proposal.pred_ious):
-            self.pred_ious = proposal.pred_ious
 
         if len(self.gt_classes) and len(proposal.gt_classes):
             self.gt_classes = np.concatenate([self.gt_classes, proposal.gt_classes])
@@ -635,8 +619,7 @@ def asProposal(dict):
             pred_ids=np.array(dict["pred_ids"]),
             height=dict["height"],
             width=dict["width"],
-            fb_set=dict["fb_set"],
-            pred_ious=np.array(dict["pred_ious"]),
+            fb_set=dict["fb_set"]
         )
     return dict
 
@@ -788,8 +771,7 @@ class ProposalDataset(datasets.VisionDataset):
             "gt_ious": proposal.gt_ious.astype(np.float),
             "gt_fg_classes": proposal.gt_fg_classes.astype(np.long),
             "width": image_width,
-            "height": image_height,
-            "pred_ious": proposal.pred_ious.astype(np.float),
+            "height": image_height
         }
 
     def __len__(self):

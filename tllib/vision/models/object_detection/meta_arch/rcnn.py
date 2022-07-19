@@ -2,6 +2,8 @@
 @author: Junguang Jiang
 @contact: JiangJunguang1123@outlook.com
 """
+from distutils.command.bdist import show_formats
+from tkinter.tix import Tree
 from typing import Tuple, Dict
 import torch
 from detectron2.modeling.meta_arch.rcnn import GeneralizedRCNN as GeneralizedRCNNBase, get_event_storage
@@ -60,7 +62,7 @@ class TLGeneralizedRCNN(GeneralizedRCNNBase):
         """"""
         if not self.training:
             return self.inference(batched_inputs)
-
+        show_flag = False
         images = self.preprocess_image(batched_inputs)
         if "instances" in batched_inputs[0] and labeled:
             gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
@@ -75,8 +77,10 @@ class TLGeneralizedRCNN(GeneralizedRCNNBase):
             assert "proposals" in batched_inputs[0]
             proposals = [x["proposals"].to(self.device) for x in batched_inputs]
             proposal_losses = {}
-
-        outputs, detector_losses = self.roi_heads(images, features, proposals, gt_instances, labeled)
+        if show_flag:
+            outputs, detector_losses = self.roi_heads(images, features, proposals, gt_instances, labeled, batched_inputs)
+        else:
+            outputs, detector_losses = self.roi_heads(images, features, proposals, gt_instances, labeled)
         if self.vis_period > 0:
             storage = get_event_storage()
             if storage.iter % self.vis_period == 0:

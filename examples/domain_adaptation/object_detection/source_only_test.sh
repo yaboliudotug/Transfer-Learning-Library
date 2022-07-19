@@ -13,11 +13,18 @@
 #   OUTPUT_DIR logs/source_only/faster_rcnn_R_101_C4/voc2watercolor_comic MODEL.ROI_HEADS.NUM_CLASSES 6
 
 # ResNet101 Based Faster RCNN: Cityscapes->Foggy Cityscapes
-CUDA_VISIBLE_DEVICES=2,3 python source_only.py  --num-gpus 2 \
-  --config-file config/faster_rcnn_R_101_C4_cityscapes.yaml \
+# CUDA_VISIBLE_DEVICES=0,1 python source_only.py  --num-gpus 2 \
+#   --config-file config/faster_rcnn_R_101_C4_cityscapes_iou.yaml \
+#   -s Cityscapes datasets/cityscapes_in_voc/ -t FoggyCityscapes datasets/foggy_cityscapes_in_voc \
+#   --test CityscapesTest datasets/cityscapes_in_voc/ FoggyCityscapesTest datasets/foggy_cityscapes_in_voc --finetune \
+#   OUTPUT_DIR logs/source_only_iou/faster_rcnn_R_101_C4/cityscapes2foggy_oriinference2
+
+CUDA_VISIBLE_DEVICES=0 python source_only.py  --num-gpus 1 \
+  --config-file config/faster_rcnn_R_101_C4_cityscapes_iou.yaml \
   -s Cityscapes datasets/cityscapes_in_voc/ -t FoggyCityscapes datasets/foggy_cityscapes_in_voc \
   --test CityscapesTest datasets/cityscapes_in_voc/ FoggyCityscapesTest datasets/foggy_cityscapes_in_voc --finetune \
-  OUTPUT_DIR logs/source_only/faster_rcnn_R_101_C4/cityscapes2foggy
+  OUTPUT_DIR logs/source_only_iou/faster_rcnn_R_101_C4/cityscapes2foggy_fgness_fg_split
+
 
 # CUDA_VISIBLE_DEVICES=2 python source_only.py  --num-gpus 1 \
 #   --config-file config/faster_rcnn_R_101_C4_cityscapes.yaml \

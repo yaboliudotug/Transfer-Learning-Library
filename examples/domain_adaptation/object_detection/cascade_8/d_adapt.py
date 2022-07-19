@@ -720,8 +720,8 @@ def train(model, logger, cfg, args, args_cls, args_box):
     proposal_validate(prop_t_fg + prop_t_bg, classes)
 
 
-    for cascade_id in range(0):
-    # for cascade_id in range(args.num_cascade):
+    # for cascade_id in range(0):
+    for cascade_id in range(args.num_cascade):
         print('\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
         print('>>>>>>>>>>> Cascade Phase {} >>>>>>>>>>>'.format(cascade_id))
         print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n')
