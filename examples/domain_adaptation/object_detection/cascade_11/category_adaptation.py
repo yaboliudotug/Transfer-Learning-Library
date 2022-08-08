@@ -1,0 +1,846 @@
+"""
+Training a category adaptor
+@author: Junguang Jiang
+@contact: JiangJunguang1123@outlook.com
+"""
+from math import gamma
+from operator import index
+import random
+from textwrap import indent
+import time
+import warnings
+import sys
+import argparse
+import os.path as osp
+from collections import deque
+import tqdm
+from typing import List
+from pprint import pprint
+import numpy as np
+import copy
+
+from sklearn.metrics import confusion_matrix
+
+import torch
+from torch import Tensor
+import torch.nn as nn
+import torch.backends.cudnn as cudnn
+from torch.optim import SGD
+from torch.optim.lr_scheduler import LambdaLR
+from torch.utils.data import DataLoader
+import torchvision.transforms as T
+import torch.nn.functional as F
+
+import mmcv
+# from mmcv.ops import sigmoid_focal_loss as _sigmoid_focal_loss
+
+sys.path.append('../../../..')
+from tllib.modules.domain_discriminator import DomainDiscriminator
+from tllib.alignment.cdan import ConditionalDomainAdversarialLoss, ImageClassifier
+from tllib.alignment.d_adapt.proposal import ProposalDataset, flatten, Proposal
+from tllib.utils.data import ForeverDataIterator
+from tllib.utils.metric import accuracy, ConfusionMatrix
+from tllib.utils.meter import AverageMeter, ProgressMeter
+from tllib.utils.logger import CompleteLogger
+from tllib.vision.transforms import ResizeImage
+
+import utils
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+class Focal_Loss():
+    def __init__(self,weight,gamma=2):
+        super(Focal_Loss,self).__init__()
+        self.gamma=gamma
+        self.weight=weight
+    def forward(self,preds,labels, ignore_index=-1):
+        index = (labels != ignore_index)
+        labels = labels[index]
+        preds = preds[index]
+        eps=1e-7
+        y_pred =preds.view((preds.size()[0],preds.size()[1],-1)) #B*C*H*W->B*C*(H*W)
+
+        target=labels.view(y_pred.size()) #B*C*H*W->B*C*(H*W)
+
+        ce=-1*torch.log(y_pred+eps)*target
+        floss=torch.pow((1-y_pred),self.gamma)*ce
+        floss=torch.mul(floss,self.weight)
+        floss=torch.sum(floss,dim=1)
+        return torch.mean(floss)
+
+
+class MultiFocalLoss(nn.Module):
+    def __init__(self, alpha=0.25, gamma=2, num_classes = 3, size_average=False):
+        super(MultiFocalLoss,self).__init__()
+        self.size_average = size_average
+        if isinstance(alpha,list):
+            assert len(alpha)==num_classes   
+            self.alpha = torch.Tensor(alpha)
+        else:
+            assert alpha<1  
+            self.alpha = torch.zeros(num_classes)
+            self.alpha[0] += alpha
+            self.alpha[1:] += (1-alpha)
+
+        self.gamma = gamma
+
+    def forward(self, preds, labels, ignore_index=-1):
+        index = (labels != ignore_index)
+        labels = labels[index]
+        preds = preds[index]
+        # assert preds.dim()==2 and labels.dim()==1
+        preds = preds.view(-1,preds.size(-1))
+        self.alpha = self.alpha.to(preds.device)
+        preds_softmax = F.softmax(preds, dim=1) 
+        preds_logsoft = torch.log(preds_softmax)
+        
+        #focal_loss func, Loss = -α(1-yi)**γ *ce_loss(xi,yi)
+        preds_softmax = preds_softmax.gather(1,labels.view(-1,1)) 
+        preds_logsoft = preds_logsoft.gather(1,labels.view(-1,1))
+        self.alpha = self.alpha.gather(0,labels.view(-1))
+        # torch.pow((1-preds_softmax), self.gamma) 为focal loss中 (1-pt)**γ
+        loss = -torch.mul(torch.pow((1-preds_softmax), self.gamma), preds_logsoft) 
+
+        loss = torch.mul(self.alpha, loss.t())
+        if self.size_average:
+            loss = loss.mean()
+        else:
+            loss = loss.sum()
+        return loss
+
+
+class MultiFocalLoss_0(nn.Module):
+    """
+    This is a implementation of Focal Loss with smooth label cross entropy supported which is proposed in
+    'Focal Loss for Dense Object Detection. (https://arxiv.org/abs/1708.02002)'
+        Focal_Loss= -1*alpha*(1-pt)^gamma*log(pt)
+    :param num_class:
+    :param alpha: (tensor) 3D or 4D the scalar factor for this criterion
+    :param gamma: (float,double) gamma > 0 reduces the relative loss for well-classified examples (p>0.5) putting more
+                    focus on hard misclassified example
+    :param smooth: (float,double) smooth value when cross entropy
+    :param balance_index: (int) balance class index, should be specific when alpha is float
+    :param size_average: (bool, optional) By default, the losses are averaged over each loss element in the batch.
+    """
+
+    def __init__(self, num_class, alpha=None, gamma=2, balance_index=-1, smooth=None, size_average=True):
+        super(MultiFocalLoss, self).__init__()
+        self.num_class = num_class
+        self.alpha = alpha
+        self.gamma = gamma
+        self.smooth = smooth
+        self.size_average = size_average
+
+        if self.alpha is None:
+            self.alpha = torch.ones(self.num_class, 1)
+        elif isinstance(self.alpha, (list, np.ndarray)):
+            assert len(self.alpha) == self.num_class
+            self.alpha = torch.FloatTensor(alpha).view(self.num_class, 1)
+            self.alpha = self.alpha / self.alpha.sum()
+        elif isinstance(self.alpha, float):
+            alpha = torch.ones(self.num_class, 1)
+            alpha = alpha * (1 - self.alpha)
+            alpha[balance_index] = self.alpha
+            self.alpha = alpha
+        else:
+            raise TypeError('Not support alpha type')
+
+        if self.smooth is not None:
+            if self.smooth < 0 or self.smooth > 1.0:
+                raise ValueError('smooth value should be in [0,1]')
+
+    def forward(self, input, target, ignore_index=-1):
+        pred = input
+        index = (target != ignore_index)
+        target = target[index]
+        pred = pred[index]
+        logit = F.softmax(input, dim=1)
+
+        if logit.dim() > 2:
+            # N,C,d1,d2 -> N,C,m (m=d1*d2*...)
+            logit = logit.view(logit.size(0), logit.size(1), -1)
+            logit = logit.permute(0, 2, 1).contiguous()
+            logit = logit.view(-1, logit.size(-1))
+        target = target.view(-1, 1)
+
+        # N = input.size(0)
+        # alpha = torch.ones(N, self.num_class)
+        # alpha = alpha * (1 - self.alpha)
+        # alpha = alpha.scatter_(1, target.long(), self.alpha)
+        epsilon = 1e-10
+        alpha = self.alpha
+        if alpha.device != input.device:
+            alpha = alpha.to(input.device)
+
+        idx = target.cpu().long()
+        one_hot_key = torch.FloatTensor(target.size(0), self.num_class).zero_()
+        one_hot_key = one_hot_key.scatter_(1, idx, 1)
+        if one_hot_key.device != logit.device:
+            one_hot_key = one_hot_key.to(logit.device)
+
+        if self.smooth:
+            one_hot_key = torch.clamp(
+                one_hot_key, self.smooth, 1.0 - self.smooth)
+        pt = (one_hot_key * logit).sum(1) + epsilon
+        logpt = pt.log()
+
+        gamma = self.gamma
+
+        alpha = alpha[idx]
+        loss = -1 * alpha * torch.pow((1 - pt), gamma) * logpt
+
+        # if self.size_average:
+        #     loss = loss.mean()
+        # else:
+        loss = loss.sum()
+        return loss
+
+def py_focal_loss_with_prob(pred,
+                            target,
+                            weight=None,
+                            gamma=2.0,
+                            alpha=0.25,
+                            reduction='sum',
+                            avg_factor=None,
+                            ignore_index=-1):
+    
+    index = target != ignore_index
+    print(index)
+    print(target.shape, pred.shape)
+    target = target[index]
+    pred = pred[index]
+    print(target.shape, pred.shape)
+
+    num_classes = pred.size(1)
+    target = F.one_hot(target, num_classes=num_classes+1)
+    target = target[:, :num_classes]
+    print('aaa')
+    print(target)
+    target = target.type_as(pred)
+    pt = (1 - pred) * target + pred * (1 - target)
+    print('bbb')
+    print(pt)
+    focal_weight = (alpha * target + (1 - alpha) *
+                    (1 - target)) * pt.pow(gamma)
+    print('ccc')
+    print(focal_weight)
+    print(pred.shape, target.shape)
+    loss = F.binary_cross_entropy(
+        pred, target, reduction='sum')# * focal_weight
+    print('ddd')
+    print(loss)
+    return loss
+
+
+class ConfidenceBasedDataSelector:
+    """Select data point based on confidence"""
+    def __init__(self, confidence_ratio=0.1, category_names=()):
+        self.confidence_ratio = confidence_ratio
+        self.categories = []
+        self.scores = []
+        self.category_names = category_names
+        self.per_category_thresholds = None
+
+    def extend(self, categories, scores):
+        self.categories.extend(categories)
+        self.scores.extend(scores)
+
+    def calculate(self):
+        per_category_scores = {c: [] for c in self.category_names}
+        for c, s in zip(self.categories, self.scores):
+            per_category_scores[c].append(s)
+
+        per_category_thresholds = {}
+        print(per_category_scores.keys())
+        for c, s in per_category_scores.items():
+            s.sort(reverse=True)
+            print(c, len(s), int(self.confidence_ratio * len(s)))
+            per_category_thresholds[c] = s[int(self.confidence_ratio * len(s))] if len(s) else 1.
+
+        print('----------------------------------------------------')
+        print("confidence threshold for each category:")
+        for c in self.category_names:
+            print('\t', c, round(per_category_thresholds[c], 3))
+        print('----------------------------------------------------')
+
+        self.per_category_thresholds = per_category_thresholds
+
+    def whether_select(self, categories, scores):
+        assert self.per_category_thresholds is not None, "please call calculate before selection!"
+        return [s > self.per_category_thresholds[c] for c, s in zip(categories, scores)]
+
+
+class RobustCrossEntropyLoss(nn.CrossEntropyLoss):
+    """Cross-entropy that's robust to label noise"""
+    def __init__(self, *args, offset=0.1, **kwargs):
+        self.offset = offset
+        super(RobustCrossEntropyLoss, self).__init__(*args, **kwargs)
+
+    def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        return F.cross_entropy(torch.clamp(input + self.offset, max=1.), target, weight=self.weight,
+                               ignore_index=self.ignore_index, reduction='sum') / input.shape[0]
+
+
+class CategoryAdaptor:
+    def __init__(self, class_names, log, args):
+        self.class_names = class_names
+        for k, v in args._get_kwargs():
+            setattr(args, k.rstrip("_c"), v)
+        self.args = args
+        print(self.args)
+        self.logger = CompleteLogger(log)
+        self.selector = ConfidenceBasedDataSelector(self.args.confidence_ratio, range(len(self.class_names) + 1))
+
+        # create model
+        print("=> using model '{}'".format(args.arch))
+        backbone = utils.get_model(args.arch, pretrain=not args.scratch)
+        pool_layer = nn.Identity() if args.no_pool else None
+        num_classes = len(self.class_names) + 1
+        self.model = ImageClassifier(backbone, num_classes, bottleneck_dim=args.bottleneck_dim,
+                                     pool_layer=pool_layer, finetune=not args.scratch).to(device)
+        # self.multifocalLoss = MultiFocalLoss(num_classes=num_classes, alpha=0.25)
+        # self.multifocalLoss = Focal_Loss()
+
+    def load_checkpoint(self):
+        if osp.exists(self.logger.get_checkpoint_path('latest')):
+            checkpoint = torch.load(self.logger.get_checkpoint_path('latest'), map_location='cpu')
+            self.model.load_state_dict(checkpoint)
+            return True
+        else:
+            return False
+
+    def prepare_training_data(self, proposal_list, labeled=True, crop_img_dir=None, ignored_scores=None, ignored_ious=None):
+        print(ignored_scores, ignored_ious)
+        print(self.args.ignored_scores, self.args.ignored_ious)
+        if ignored_scores is None:
+            ignored_scores = self.args.ignored_scores
+        if ignored_ious is None:
+            ignored_ious = self.args.ignored_ious
+        print(ignored_scores, ignored_ious)
+        if not labeled:
+            # remove proposals with confidence score between (ignored_scores[0], ignored_scores[1])
+            filtered_proposals_list = []
+            assert len(ignored_scores) == 2 and ignored_scores[0] <= ignored_scores[1], \
+                "Please provide a range for ignored_scores!"
+            for proposals in proposal_list:
+                keep_indices = ~((ignored_scores[0] < proposals.pred_scores)
+                                 & (proposals.pred_scores < ignored_scores[1]))
+# !!!!!!!!!!!!!!!!!!!!! xiahangwei xinzeng
+                # keep_indices = proposals.pred_scores >= ignored_scores[1]
+                filtered_proposals_list.append(proposals[keep_indices])
+
+            # calculate confidence threshold for each cateogry on the target domain
+            for proposals in filtered_proposals_list:
+                self.selector.extend(proposals.pred_classes.tolist(), proposals.pred_scores.tolist())
+            self.selector.calculate()
+        else:
+            # remove proposals with ignored classes or ious between (ignored_ious[0], ignored_ious[1])
+            filtered_proposals_list = []
+            for proposals in proposal_list:
+                keep_indices = (proposals.gt_classes != -1) & \
+                               ~((ignored_ious[0] < proposals.gt_ious) &
+                                 (proposals.gt_ious < ignored_ious[1]))
+                filtered_proposals_list.append(proposals[keep_indices])
+
+        filtered_proposals_list = flatten(filtered_proposals_list, self.args.max_train)
+
+        normalize = T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        transform = T.Compose([
+            ResizeImage(self.args.resize_size),
+            T.RandomHorizontalFlip(),
+            T.ColorJitter(brightness=0.7, contrast=0.7, saturation=0.7, hue=0.5),
+            T.RandomGrayscale(),
+            T.ToTensor(),
+            normalize
+        ])
+
+        dataset = ProposalDataset(filtered_proposals_list, transform, crop_img_dir=crop_img_dir)
+        dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
+                                shuffle=True, num_workers=self.args.workers, drop_last=True)
+        return dataloader
+
+    def prepare_validation_data_0(self, proposal_list, crop_img_dir=None):
+        """call this function if you have labeled data for validation"""
+        normalize = T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        transform = T.Compose([
+            ResizeImage(self.args.resize_size), 
+            T.ToTensor(),
+            normalize
+        ])
+
+        # remove proposals with ignored classes
+        filtered_proposals_list = []
+        for proposals in proposal_list:
+            keep_indices = proposals.gt_classes != -1
+            filtered_proposals_list.append(proposals[keep_indices])
+
+        filtered_proposals_list = flatten(filtered_proposals_list, self.args.max_val)
+        dataset = ProposalDataset(filtered_proposals_list, transform, crop_img_dir=crop_img_dir)
+        dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
+                                shuffle=False, num_workers=self.args.workers, drop_last=False)
+        return dataloader
+
+    def prepare_validation_data(self, proposal_list, crop_img_dir=None, ignored_scores=None):
+        if ignored_scores is None:
+            ignored_scores = self.args.ignored_scores
+        """call this function if you have labeled data for validation"""
+        normalize = T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        transform = T.Compose([
+            ResizeImage(self.args.resize_size),
+            T.ToTensor(),
+            normalize
+        ])
+
+        # remove proposals with ignored classes
+        filtered_proposals_list = []
+        for proposals in proposal_list:
+            keep_indices = proposals.gt_classes != -1
+            
+            proposals.gt_classes[~keep_indices] = proposals.gt_fg_classes[~keep_indices]
+            filtered_proposals_list.append(proposals)
+
+            # filtered_proposals_list.append(proposals[keep_indices])
+            
+
+        filtered_proposals_list = flatten(filtered_proposals_list)
+        # filtered_proposals_list = flatten(filtered_proposals_list, self.args.max_val)
+        dataset = ProposalDataset(filtered_proposals_list, transform, crop_img_dir=crop_img_dir)
+        dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
+                                shuffle=False, num_workers=self.args.workers, drop_last=False)
+        return dataloader
+
+    def prepare_test_data(self, proposal_list, crop_img_dir=None):
+        normalize = T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        transform = T.Compose([
+            ResizeImage(self.args.resize_size),
+            T.ToTensor(),
+            normalize
+        ])
+
+        dataset = ProposalDataset(proposal_list, transform, crop_img_dir=crop_img_dir)
+        dataloader = DataLoader(dataset, batch_size=self.args.batch_size,
+                                shuffle=False, num_workers=self.args.workers, drop_last=False)
+        return dataloader
+
+    def fit(self, data_loader_source, data_loader_target, data_loader_validation=None):
+        """When no labels exists on target domain, please set data_loader_validation=None"""
+        args = self.args
+        if args.seed is not None:
+            random.seed(args.seed)
+            torch.manual_seed(args.seed)
+            cudnn.deterministic = True
+            warnings.warn('You have chosen to seed training. '
+                          'This will turn on the CUDNN deterministic setting, '
+                          'which can slow down your training considerably! '
+                          'You may see unexpected behavior when restarting '
+                          'from checkpoints.')
+
+        cudnn.benchmark = True
+
+        iter_source = ForeverDataIterator(data_loader_source)
+        iter_target = ForeverDataIterator(data_loader_target)
+
+        model = self.model
+        feature_dim = model.features_dim
+        num_classes = len(self.class_names) + 1
+
+        if args.randomized:
+            domain_discri = DomainDiscriminator(args.randomized_dim, hidden_size=1024).to(device)
+        else:
+            domain_discri = DomainDiscriminator(feature_dim * num_classes, hidden_size=1024).to(device)
+
+        all_parameters = model.get_parameters() + domain_discri.get_parameters()
+        # define optimizer and lr scheduler
+        optimizer = SGD(all_parameters, args.lr, momentum=args.momentum, weight_decay=args.weight_decay, nesterov=True)
+        lr_scheduler = LambdaLR(optimizer, lambda x: args.lr * (1. + args.lr_gamma * float(x)) ** (-args.lr_decay))
+
+        # define loss function
+        domain_adv = ConditionalDomainAdversarialLoss(
+            domain_discri, entropy_conditioning=args.entropy,
+            num_classes=num_classes, features_dim=feature_dim, randomized=args.randomized,
+            randomized_dim=args.randomized_dim
+        ).to(device)
+
+        # start training
+        best_acc1 = 0.
+        for epoch in range(args.epochs):
+            print("lr:", lr_scheduler.get_last_lr()[0])
+            # train for one epoch
+            batch_time = AverageMeter('Time', ':3.1f')
+            data_time = AverageMeter('Data', ':3.1f')
+            losses = AverageMeter('Loss', ':3.2f')
+            losses_t = AverageMeter('Loss(t)', ':3.2f')
+            trans_losses = AverageMeter('Trans Loss', ':3.2f')
+            cls_accs = AverageMeter('Cls Acc', ':3.1f')
+            domain_accs = AverageMeter('Domain Acc', ':3.1f')
+            progress = ProgressMeter(
+                args.iters_per_epoch,
+                [batch_time, data_time, losses, losses_t, trans_losses, cls_accs, domain_accs],
+                prefix="Epoch: [{}]".format(epoch))
+
+            # switch to train mode
+            model.train()
+            domain_adv.train()
+
+            end = time.time()
+            for i in range(args.iters_per_epoch):
+                x_s, labels_s = next(iter_source)
+                x_t, labels_t = next(iter_target)
+
+                # assign pseudo labels for target-domain proposals with extremely high confidence
+                selected = torch.tensor(
+                    self.selector.whether_select(
+                        labels_t['pred_classes'].numpy().tolist(),
+                        labels_t['pred_scores'].numpy().tolist()
+                    )
+                )
+                # selected = torch.tensor([True for j in range(len(labels_t['pred_classes']))])
+                
+                # filter_threshold = 0.9
+                # selected = torch.tensor([one_score >= filter_threshold for one_score in labels_t['pred_scores'].numpy().tolist()])
+                
+
+                pseudo_classes_t = selected * labels_t['pred_classes'] + (~selected) * -1
+                pseudo_classes_t = pseudo_classes_t.to(device)
+
+                x_s = x_s.to(device)
+                x_t = x_t.to(device)
+                gt_classes_s = labels_s['gt_classes'].to(device)
+
+                # measure data loading time
+                data_time.update(time.time() - end)
+
+                # compute output
+                x = torch.cat((x_s, x_t), dim=0)    #此处相当于batchsize变大两倍，可以不cat，使bs与设置保持一直
+                y, f = model(x)
+                y_s, y_t = y.chunk(2, dim=0)
+                f_s, f_t = f.chunk(2, dim=0)
+
+                # y_s, f_s = model(x_s)
+                # y_t, f_t = model(x_t)
+
+                cls_loss = F.cross_entropy(y_s, gt_classes_s, ignore_index=-1)
+                cls_loss_t = RobustCrossEntropyLoss(ignore_index=-1, offset=args.epsilon)(y_t, pseudo_classes_t)
+
+                # cls_loss = self.multifocalLoss(y_s, gt_classes_s, ignore_index=-1)
+                # cls_loss_t = self.multifocalLoss(y_t, pseudo_classes_t, ignore_index=-1)
+
+                # index_catched = (gt_classes_s != -1)
+                # y_s, gt_classes_s = y_s[index_catched], gt_classes_s[index_catched]
+                # cls_loss = _sigmoid_focal_loss(y_s.contiguous(), gt_classes_s.contiguous(), gamma=2.0, alpha=0.25, weight=None, reduction='sum')
+                # index_catched = (pseudo_classes_t != -1)
+                # y_t, pseudo_classes_t = y_t[index_catched], pseudo_classes_t[index_catched]
+                # cls_loss_t = _sigmoid_focal_loss(y_t.contiguous(), pseudo_classes_t.contiguous(), gamma=2.0, alpha=0.25, weight=None, reduction='sum')
+
+
+                # cls_loss = py_focal_loss_with_prob(y_s, gt_classes_s, ignore_index=-1)
+                # cls_loss_t = py_focal_loss_with_prob(y_t, pseudo_classes_t, ignore_index=-1)
+
+                transfer_loss = domain_adv(y_s, f_s, y_t, f_t)
+                domain_acc = domain_adv.domain_discriminator_accuracy
+                loss = cls_loss + transfer_loss * args.trade_off + cls_loss_t
+
+                cls_acc = accuracy(y_s, gt_classes_s)[0]
+
+                losses.update(loss.item(), x_s.size(0))
+                cls_accs.update(cls_acc, x_s.size(0))
+                domain_accs.update(domain_acc, x_s.size(0))
+                trans_losses.update(transfer_loss.item(), x_s.size(0))
+                losses_t.update(cls_loss_t.item(), x_s.size(0))
+
+                # compute gradient and do SGD step
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                lr_scheduler.step()
+
+                # measure elapsed time
+                batch_time.update(time.time() - end)
+                end = time.time()
+
+                if i % args.print_freq == 0:
+                    current_time = time.strftime('%m-%d %H:%M:%S',time.localtime(time.time()))
+                    print(current_time)
+                    progress.display(i)
+
+            # evaluate on validation set
+            if data_loader_validation is not None and (epoch + 1) % args.eval_frequence == 0:
+                acc1 = self.validate(data_loader_validation, model, self.class_names, args)
+                best_acc1 = max(acc1, best_acc1)
+
+            # save checkpoint
+            torch.save(model.state_dict(), self.logger.get_checkpoint_path('latest'))
+
+        print("best_acc1 = {:3.1f}".format(best_acc1))
+        domain_adv.to(torch.device("cpu"))
+        self.logger.logger.flush()
+
+    def predict(self, data_loader):
+        # switch to evaluate mode
+        self.model.eval()
+        predictions = deque()
+        scores = deque()
+        sm = nn.Softmax(dim=1)
+        with torch.no_grad():
+            for images, _ in tqdm.tqdm(data_loader):
+                images = images.to(device)
+
+                # compute output
+                output = self.model(images)
+                prediction = output.argmax(-1).cpu().numpy().tolist()
+                score = sm(output).max(-1)[0].cpu().numpy().tolist()
+                for p in prediction:
+                    predictions.append(p)
+                for s in score:
+                    scores.append(s)
+        return predictions, scores
+
+    @staticmethod
+    def validate(val_loader, model, class_names, args) -> float:
+        batch_time = AverageMeter('Time', ':6.3f')
+        losses = AverageMeter('Loss', ':.4e')
+        top1 = AverageMeter('Acc@1', ':6.2f')
+        progress = ProgressMeter(
+            len(val_loader),
+            [batch_time, losses, top1],
+            prefix='Test: ')
+
+        # switch to evaluate mode
+        model.eval()
+        confmat = ConfusionMatrix(len(class_names)+1)
+
+        pred_true_class_dict = [[] for i in range(len(class_names) + 1)]
+        pred_true_score_dict = [[] for i in range(len(class_names) + 1)]
+        pred_true_score_dict_mean = [[] for i in range(len(class_names) + 1)]
+        pred_true_score_dict_max = [[] for i in range(len(class_names) + 1)]
+        pred_true_score_dict_min = [[] for i in range(len(class_names) + 1)]
+        pred_true_iou_dict = [[] for i in range(len(class_names) + 1)]
+        pred_true_iou_dict_mean = [[] for i in range(len(class_names) + 1)]
+        pred_true_iou_dict_max = [[] for i in range(len(class_names) + 1)]
+        pred_true_iou_dict_min = [[] for i in range(len(class_names) + 1)]
+        for i in range(len(class_names) + 1):
+            pred_true_class_dict[i] = [0 for j in range(len(class_names) + 1)]
+            pred_true_score_dict_mean[i] = [0 for j in range(len(class_names) + 1)]
+            pred_true_score_dict[i] = [[] for j in range(len(class_names) + 1)]
+            pred_true_score_dict_max[i] = [0 for j in range(len(class_names) + 1)]
+            pred_true_score_dict_min[i] = [0 for j in range(len(class_names) + 1)]
+            pred_true_iou_dict[i] = [[] for i in range(len(class_names) + 1)]
+            pred_true_iou_dict_mean[i] = [[] for i in range(len(class_names) + 1)]
+            pred_true_iou_dict_max[i] = [[] for i in range(len(class_names) + 1)]
+            pred_true_iou_dict_min[i] = [[] for i in range(len(class_names) + 1)]
+
+
+        with torch.no_grad():
+            end = time.time()
+            for i, (images, labels) in enumerate(val_loader):
+                images = images.to(device)
+                gt_classes = labels['gt_classes'].to(device)
+                gt_ious = labels['gt_ious'].to(device)
+
+                # compute output
+                output = model(images)
+                loss = F.cross_entropy(output, gt_classes)
+
+                # measure accuracy and record loss
+                acc1, = accuracy(output, gt_classes, topk=(1,))
+                confmat.update(gt_classes, output.argmax(1))
+                losses.update(loss.item(), images.size(0))
+                top1.update(acc1.item(), images.size(0))
+
+
+                pred_classes = output.argmax(1)
+                pred_scores = F.softmax(output)
+                pred_scores = pred_scores.max(1)[0]
+
+                for j in range(len(pred_classes)):
+                    # print(j)
+                    # print(gt_ious)
+                    # print(gt_ious[j].cpu())
+                    # print(int(pred_classes[j].cpu()), int(gt_classes[j].cpu()))
+                    # print(np.array(pred_true_iou_dict).shape)
+                    pred_true_score_dict[int(pred_classes[j].cpu())][int(gt_classes[j].cpu())].append(float(pred_scores[j].cpu()))
+                    pred_true_iou_dict[int(pred_classes[j].cpu())][int(gt_classes[j].cpu())].append(float(gt_ious[j].cpu()))
+                    pred_true_class_dict[int(pred_classes[j].cpu())][int(gt_classes[j].cpu())] += 1
+
+
+                # measure elapsed time
+                batch_time.update(time.time() - end)
+                end = time.time()
+
+                if i % args.print_freq == 0:
+                    progress.display(i)
+
+            print(' * Acc@1 {top1.avg:.3f}'.format(top1=top1))
+            print(confmat.format(class_names+["bg"]))
+            # print(confmat.mat)
+            pred_true_class_dict = np.array(pred_true_class_dict)
+            pprint(pred_true_class_dict)
+
+            for i in range(len(class_names) + 1):
+                for j in range(len(class_names) + 1):
+                    if len(pred_true_score_dict[i][j]) == 0:
+                        pred_true_score_dict[i][j] = [0]
+                        pred_true_iou_dict[i][j] = [0]
+                        # pred_true_score_dict_mean[i][j] = [0]
+                    # else:
+                    pred_true_score_dict_mean[i][j] = sum(pred_true_score_dict[i][j]) / len(pred_true_score_dict[i][j])
+                    pred_true_score_dict_mean[i][j] = round(pred_true_score_dict_mean[i][j], 2)
+                    pred_true_score_dict_max[i][j] = round(max(pred_true_score_dict[i][j]), 2)
+                    pred_true_score_dict_min[i][j] = round(min(pred_true_score_dict[i][j]), 2)
+
+                    pred_true_iou_dict_mean[i][j] = sum(pred_true_iou_dict[i][j]) / len(pred_true_iou_dict[i][j])
+                    pred_true_iou_dict_mean[i][j] = round(pred_true_iou_dict_mean[i][j], 2)
+                    pred_true_iou_dict_max[i][j] = round(max(pred_true_iou_dict[i][j]), 2)
+                    pred_true_iou_dict_min[i][j] = round(min(pred_true_iou_dict[i][j]), 2)
+
+            pred_true_score_dict_mean = np.array(pred_true_score_dict_mean)
+            pred_true_score_dict_min = np.array(pred_true_score_dict_min)
+            pred_true_score_dict_max = np.array(pred_true_score_dict_max)
+
+            pred_true_iou_dict_mean = np.array(pred_true_iou_dict_mean)
+            pred_true_iou_dict_min = np.array(pred_true_iou_dict_min)
+            pred_true_iou_dict_max = np.array(pred_true_iou_dict_max)
+
+            print('------ scores ------')
+            pprint(pred_true_score_dict_mean)
+            pprint(pred_true_score_dict_min)
+            pprint(pred_true_score_dict_max)
+
+            print('------ iou ------')
+            pprint(pred_true_iou_dict_mean)
+            pprint(pred_true_iou_dict_min)
+            pprint(pred_true_iou_dict_max)
+
+        return top1.avg
+
+    @staticmethod
+    def simply_validate(val_loader, class_names):
+        confmat = ConfusionMatrix(len(class_names)+1)
+        pred_true_class_dict = [[] for i in range(len(class_names) + 1)]
+        pred_true_score_dict = [[] for i in range(len(class_names) + 1)]
+        pred_true_score_dict_mean = [[] for i in range(len(class_names) + 1)]
+        pred_true_score_dict_max = [[] for i in range(len(class_names) + 1)]
+        pred_true_score_dict_min = [[] for i in range(len(class_names) + 1)]
+        pred_true_iou_dict = [[] for i in range(len(class_names) + 1)]
+        pred_true_iou_dict_mean = [[] for i in range(len(class_names) + 1)]
+        pred_true_iou_dict_max = [[] for i in range(len(class_names) + 1)]
+        pred_true_iou_dict_min = [[] for i in range(len(class_names) + 1)]
+        
+        for i in range(len(class_names) + 1):
+            pred_true_class_dict[i] = [0 for j in range(len(class_names) + 1)]
+            pred_true_score_dict[i] = [[] for j in range(len(class_names) + 1)]
+            pred_true_score_dict_mean[i] = [0 for j in range(len(class_names) + 1)]
+            pred_true_score_dict_max[i] = [0 for j in range(len(class_names) + 1)]
+            pred_true_score_dict_min[i] = [0 for j in range(len(class_names) + 1)]
+            pred_true_iou_dict[i] = [[] for j in range(len(class_names) + 1)]
+            pred_true_iou_dict_mean[i] = [0 for j in range(len(class_names) + 1)]
+            pred_true_iou_dict_max[i] = [0 for j in range(len(class_names) + 1)]
+            pred_true_iou_dict_min[i] = [0 for j in range(len(class_names) + 1)]
+
+        for i, (images, labels) in enumerate(val_loader):
+            gt_classes = labels['gt_classes'].to(device)
+            gt_ious = labels['gt_ious'].to(device)
+            pred_classes = labels['pred_classes'].to(device)
+            pred_scores = labels['pred_scores'].to(device)
+            confmat.update(gt_classes, pred_classes)
+            for j in range(len(pred_classes)):
+                pred_true_score_dict[int(pred_classes[j].cpu())][int(gt_classes[j].cpu())].append(float(pred_scores[j].cpu()))
+                pred_true_iou_dict[int(pred_classes[j].cpu())][int(gt_classes[j].cpu())].append(float(gt_ious[j].cpu()))
+                pred_true_class_dict[int(pred_classes[j].cpu())][int(gt_classes[j].cpu())] += 1
+
+        pprint(confmat.format(class_names+["bg"]))
+        pprint(confmat.mat)
+        pred_true_class_dict = np.array(pred_true_class_dict)
+        pprint(pred_true_class_dict)
+        
+        for i in range(len(class_names) + 1):
+            for j in range(len(class_names) + 1):
+                if len(pred_true_score_dict[i][j]) == 0:
+                    pred_true_score_dict[i][j] = [0]
+                    pred_true_iou_dict[i][j] = [0]
+                pred_true_score_dict_mean[i][j] = sum(pred_true_score_dict[i][j]) / len(pred_true_score_dict[i][j])
+                pred_true_score_dict_mean[i][j] = round(pred_true_score_dict_mean[i][j], 2)
+                pred_true_score_dict_max[i][j] = round(max(pred_true_score_dict[i][j]), 2)
+                pred_true_score_dict_min[i][j] = round(min(pred_true_score_dict[i][j]), 2)
+                
+                pred_true_iou_dict_mean[i][j] = sum(pred_true_iou_dict[i][j]) / len(pred_true_iou_dict[i][j])
+                pred_true_iou_dict_mean[i][j] = round(pred_true_iou_dict_mean[i][j], 2)
+                pred_true_iou_dict_max[i][j] = round(max(pred_true_iou_dict[i][j]), 2)
+                pred_true_iou_dict_min[i][j] = round(min(pred_true_iou_dict[i][j]), 2)
+
+
+        pred_true_score_dict_mean = np.array(pred_true_score_dict_mean)
+        pred_true_score_dict_min = np.array(pred_true_score_dict_min)
+        pred_true_score_dict_max = np.array(pred_true_score_dict_max)
+
+        pred_true_iou_dict_mean = np.array(pred_true_iou_dict_mean)
+        pred_true_iou_dict_min = np.array(pred_true_iou_dict_min)
+        pred_true_iou_dict_max = np.array(pred_true_iou_dict_max)
+
+        print('------ scores ------')
+        pprint(pred_true_score_dict_mean)
+        pprint(pred_true_score_dict_min)
+        pprint(pred_true_score_dict_max)
+        print('------ iou ------')
+        pprint(pred_true_iou_dict_mean)
+        pprint(pred_true_iou_dict_min)
+        pprint(pred_true_iou_dict_max)
+
+
+    @staticmethod
+    def get_parser() -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser(add_help=False)
+        # dataset parameters
+        parser.add_argument('--resize-size-c', type=int, default=112,
+                            help='the image size after resizing')
+        parser.add_argument('--ignored-scores-c', type=float, nargs='+', default=[0.05, 0.3])
+        parser.add_argument('--max-train-c', type=int, default=10)
+        parser.add_argument('--max-val-c', type=int, default=2)
+        parser.add_argument('--ignored-ious-c', type=float, nargs='+', default=(0.4, 0.5),
+                            help='the iou threshold for ignored boxes')
+        parser.add_argument('--arch-c', metavar='ARCH', default='resnet101',
+                            choices=utils.get_model_names(),
+                            help='backbone architecture: ' +
+                                 ' | '.join(utils.get_model_names()) +
+                                 ' (default: resnet101)')
+        parser.add_argument('--bottleneck-dim-c', default=1024, type=int,
+                            help='Dimension of bottleneck')
+        parser.add_argument('--no-pool-c', action='store_true',
+                            help='no pool layer after the feature extractor.')
+        parser.add_argument('--scratch-c', action='store_true', help='whether train from scratch.')
+        parser.add_argument('--randomized-c', action='store_true',
+                            help='using randomized multi-linear-map (default: False)')
+        parser.add_argument('--randomized-dim-c', default=1024, type=int,
+                            help='randomized dimension when using randomized multi-linear-map (default: 1024)')
+        parser.add_argument('--entropy-c', default=False, action='store_true', help='use entropy conditioning')
+        parser.add_argument('--trade-off-c', default=1., type=float,
+                            help='the trade-off hyper-parameter for transfer loss')
+        parser.add_argument('--confidence-ratio-c', default=0.0, type=float)
+        parser.add_argument('--epsilon-c', default=0.01, type=float,
+                            help='epsilon hyper-parameter in Robust Cross Entropy')
+        # training parameters
+        parser.add_argument('--batch-size-c', default=64, type=int,
+                            metavar='N',
+                            help='mini-batch size (default: 64)')   # 64
+        parser.add_argument('--learning-rate-c', default=0.01, type=float,
+                            metavar='LR', help='initial learning rate', dest='lr')
+        parser.add_argument('--lr-gamma-c', default=0.001, type=float, help='parameter for lr scheduler')
+        parser.add_argument('--lr-decay-c', default=0.75, type=float, help='parameter for lr scheduler')
+        parser.add_argument('--momentum-c', default=0.9, type=float, metavar='M', help='momentum')
+        parser.add_argument('--weight-decay-c', default=1e-3, type=float,
+                            metavar='W', help='weight decay (default: 1e-3)',
+                            dest='weight_decay')
+        parser.add_argument('--workers-c', default=4, type=int, metavar='N',
+                            help='number of data loading workers (default: 2)')
+        parser.add_argument('--epochs-c', default=10, type=int, metavar='N',
+                            help='number of total epochs to run')   # 10
+        parser.add_argument('--iters-per-epoch-c', default=1000, type=int,
+                            help='Number of iterations per epoch') # 1000
+        parser.add_argument('--print-freq-c', default=100, type=int,
+                            metavar='N', help='print frequency (default: 100)')
+        parser.add_argument('--eval-frequence-c', default=2, type=int)
+        parser.add_argument('--seed-c', default=None, type=int,
+                            help='seed for initializing training. ')
+        parser.add_argument("--log-c", type=str, default='cdan',
+                            help="Where to save logs, checkpoints and debugging images.")
+        return parser

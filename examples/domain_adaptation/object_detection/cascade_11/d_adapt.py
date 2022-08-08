@@ -723,6 +723,7 @@ def train(model, logger, cfg, args, args_cls, args_box):
         # fg ness
         # pre_cache_root = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_9/logs/faster_rcnn_R_101_C4/cityscapes2foggy_debug_fgness/phase1/cache'
     else:
+        
         pre_cache_root = '/disk/liuyabo/research/Transfer-Learning-Library/examples/domain_adaptation/object_detection/cascade_4/logs/faster_rcnn_R_101_C4/cityscapes2foggy_update_0/phase1/cache'
 
     if args.use_pre_cache:

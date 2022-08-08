@@ -701,7 +701,7 @@ def fast_rcnn_inference_single_image_iou(
     if topk_per_image >= 0:
         keep = keep[:topk_per_image]
     boxes, scores, filter_inds, ious = boxes[keep], scores[keep], filter_inds[keep], ious[keep]
-    print(boxes.shape, scores.shape, filter_inds.shape, ious.shape)
+    # print(boxes.shape, scores.shape, filter_inds.shape, ious.shape)
 
     result = Instances(image_shape)
     result.pred_boxes = Boxes(boxes)
