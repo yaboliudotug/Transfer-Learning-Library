@@ -1,13 +1,13 @@
 # ResNet101 Based Faster RCNN: Faster RCNN: VOC->Clipart
 # 49.0
-# pretrained_models=../logs/source_only/faster_rcnn_R_101_C4/voc2clipart/model_final.pth
-# CUDA_VISIBLE_DEVICES=0 python d_adapt.py --num-gpus 1 \
-#   --config-file config/faster_rcnn_R_101_C4_voc.yaml \
-#   --use-pre-cache 1 --use-pre-crop 1 --update-score 0 --update-proposal 0 \
-#   -s VOC2007 ../datasets/VOC2007 VOC2012 ../datasets/VOC2012  \
-#   -t Clipart ../datasets/clipart --test Clipart ../datasets/clipart \
-#   --finetune --bbox-refine \
-#   OUTPUT_DIR logs/for_paper/faster_rcnn_R_101_C4/voc2clipart/phase1 MODEL.WEIGHTS ${pretrained_models} SEED 0
+pretrained_models=../logs/source_only/faster_rcnn_R_101_C4/voc2clipart/model_final.pth
+CUDA_VISIBLE_DEVICES=0 python d_adapt.py --num-gpus 1 \
+  --config-file config/faster_rcnn_R_101_C4_voc.yaml \
+  --use-pre-cache 0 --use-pre-crop 1 --update-score 0 --update-proposal 0 \
+  -s VOC2007 ../datasets/VOC2007 VOC2012 ../datasets/VOC2012  \
+  -t Clipart ../datasets/clipart --test Clipart ../datasets/clipart \
+  --finetune --bbox-refine \
+  OUTPUT_DIR logs/for_paper/faster_rcnn_R_101_C4/voc2clipartnew——test/phase1 MODEL.WEIGHTS ${pretrained_models} SEED 0
 
 
 # # ResNet101 Based Faster RCNN: Faster RCNN: VOC->WaterColor
@@ -45,39 +45,42 @@
 
 # # VGG Based Faster RCNN: Cityscapes -> Foggy Cityscapes
 # # 33.3
-pretrained_models=../logs/source_only/faster_rcnn_vgg_16/cityscapes2foggy/model_final.pth
-CUDA_VISIBLE_DEVICES=0 python d_adapt.py --num-gpus 1 --workers-c 4 --max-train-c 20 --ignored-scores-c 0.05 0.5 \
-  --config-file config/faster_rcnn_vgg_16_cityscapes.yaml \
-  --use-pre-cache 0 --use-pre-crop 1 --update-score 0 --update-proposal 0 \
-  -s Cityscapes ../datasets/cityscapes_in_voc -t FoggyCityscapes ../datasets/foggy_cityscapes_in_voc/  \
-  --test FoggyCityscapesTest ../datasets/foggy_cityscapes_in_voc/ --finetune --trade-off 0.5 --bbox-refine \
-  OUTPUT_DIR logs/for_paper/faster_rcnn_vgg_16/cityscapes2foggy/phase1 MODEL.WEIGHTS ${pretrained_models} SEED 0
+# pretrained_models=../logs/source_only/faster_rcnn_vgg_16/cityscapes2foggy/model_final.pth
+# CUDA_VISIBLE_DEVICES=0 python d_adapt.py --num-gpus 1 --workers-c 4 --max-train-c 20 --ignored-scores-c 0.05 0.5 \
+#   --config-file config/faster_rcnn_vgg_16_cityscapes.yaml \
+#   --use-pre-cache 0 --use-pre-crop 1 --update-score 0 --update-proposal 0 \
+#   -s Cityscapes ../datasets/cityscapes_in_voc -t FoggyCityscapes ../datasets/foggy_cityscapes_in_voc/  \
+#   --test FoggyCityscapesTest ../datasets/foggy_cityscapes_in_voc/ --finetune --trade-off 0.5 --bbox-refine \
+#   OUTPUT_DIR logs/for_paper/faster_rcnn_vgg_16/cityscapes2foggy/phase1 MODEL.WEIGHTS ${pretrained_models} SEED 0
 
 
 # # ResNet101 Based Faster RCNN: Sim10k -> Cityscapes Car
 # # 51.9
 # pretrained_models=../logs/source_only/faster_rcnn_R_101_C4/sim10k2cityscapes_car/model_final.pth
-# CUDA_VISIBLE_DEVICES=0,1,2,3 python d_adapt.py --num-gpus 4 --workers-c 8 --ignored-scores-c 0.05 0.5 --bottleneck-dim-c 256 --bottleneck-dim-b 256 \
+# CUDA_VISIBLE_DEVICES=1 python d_adapt.py --num-gpus 1 --workers-c 8 --ignored-scores-c 0.05 0.5 --bottleneck-dim-c 256 --bottleneck-dim-b 256 \
 #   --config-file config/faster_rcnn_R_101_C4_cityscapes.yaml \
+#   --use-pre-cache 0 --use-pre-crop 1 --update-score 0 --update-proposal 0 \
 #   -s Sim10kCar ../datasets/sim10k -t CityscapesCar ../datasets/cityscapes_in_voc/  \
 #   --test CityscapesCarTest ../datasets/cityscapes_in_voc/ --finetune --bbox-refine \
-#   OUTPUT_DIR logs/faster_rcnn_R_101_C4/sim10k2cityscapes_car/phase1 MODEL.ROI_HEADS.NUM_CLASSES 1 MODEL.WEIGHTS ${pretrained_models} SEED 0
+#   OUTPUT_DIR logs/for_paper/faster_rcnn_R_101_C4/sim10k2cityscapes_car/phase1 MODEL.ROI_HEADS.NUM_CLASSES 1 MODEL.WEIGHTS ${pretrained_models} SEED 0
 
 # # VGG Based Faster RCNN: Sim10k -> Cityscapes Car
 # # 49.3
 # pretrained_models=../logs/source_only/faster_rcnn_vgg_16/sim10k2cityscapes_car/model_final.pth
-# CUDA_VISIBLE_DEVICES=0,1,2,3 python d_adapt.py --num-gpus 4 --workers-c 8 --ignored-scores-c 0.05 0.5 --bottleneck-dim-c 256 --bottleneck-dim-b 256 \
+# CUDA_VISIBLE_DEVICES=0 python d_adapt.py --num-gpus 1 --workers-c 8 --ignored-scores-c 0.05 0.5 --bottleneck-dim-c 256 --bottleneck-dim-b 256 \
 #   --config-file config/faster_rcnn_vgg_16_cityscapes.yaml \
 #   -s Sim10kCar ../datasets/sim10k -t CityscapesCar ../datasets/cityscapes_in_voc/  \
+#   --use-pre-cache 0 --use-pre-crop 1 --update-score 0 --update-proposal 0 \
 #   --test CityscapesCarTest ../datasets/cityscapes_in_voc/ --finetune --trade-off 0.5 --bbox-refine \
-#   OUTPUT_DIR logs/faster_rcnn_vgg_16/sim10k2cityscapes_car/phase1 MODEL.ROI_HEADS.NUM_CLASSES 1 MODEL.WEIGHTS ${pretrained_models} SEED 0
+#   OUTPUT_DIR logs/for_paper/faster_rcnn_vgg_16/sim10k2cityscapes_car/phase1 MODEL.ROI_HEADS.NUM_CLASSES 1 MODEL.WEIGHTS ${pretrained_models} SEED 0
 
 # # RetinaNet: VOC->Clipart
 # # 44.7
 # pretrained_models=../logs/source_only/retinanet_R_101_FPN/voc2clipart/model_final.pth
-# CUDA_VISIBLE_DEVICES=0,1,2,3 python d_adapt.py --num-gpus 4 --remove-bg \
+# CUDA_VISIBLE_DEVICES=1 python d_adapt.py --num-gpus 1 --remove-bg \
 #   --config-file config/retinanet_R_101_FPN_voc.yaml \
+#   --use-pre-cache 0 --use-pre-crop 1 --update-score 0 --update-proposal 0 \
 #   -s VOC2007 ../datasets/VOC2007 VOC2012 ../datasets/VOC2012  \
 #   -t Clipart ../datasets/clipart --test Clipart ../datasets/clipart \
 #   --finetune --bbox-refine \
-#   OUTPUT_DIR logs/retinanet_R_101_FPN/voc2clipart/phase1 MODEL.WEIGHTS ${pretrained_models} SEED 0
+#   OUTPUT_DIR logs/for_paper/retinanet_R_101_FPN/voc2clipartnew/phase1 MODEL.WEIGHTS ${pretrained_models} SEED 0

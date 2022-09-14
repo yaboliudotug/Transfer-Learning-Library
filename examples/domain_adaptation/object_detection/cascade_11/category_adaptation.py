@@ -34,10 +34,14 @@ import torch.nn.functional as F
 import mmcv
 # from mmcv.ops import sigmoid_focal_loss as _sigmoid_focal_loss
 
+USE_IOU = False
 sys.path.append('../../../..')
 from tllib.modules.domain_discriminator import DomainDiscriminator
 from tllib.alignment.cdan import ConditionalDomainAdversarialLoss, ImageClassifier
-from tllib.alignment.d_adapt.proposal import ProposalDataset, flatten, Proposal
+if USE_IOU:
+    from tllib.alignment.d_adapt.proposal import ProposalDataset, flatten, Proposal
+else:
+    from tllib.alignment.d_adapt.proposal_0 import ProposalDataset, flatten, Proposal
 from tllib.utils.data import ForeverDataIterator
 from tllib.utils.metric import accuracy, ConfusionMatrix
 from tllib.utils.meter import AverageMeter, ProgressMeter
